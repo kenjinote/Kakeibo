@@ -1,4 +1,6 @@
 #include "home.h"
+#define _USE_MATH_DEFINES
+#include <math.h>
 
 // via https://contents-open.hatenablog.com/entry/2021/08/19/231157#:~:text=10%E8%89%B2%EF%BC%88Paul%20Tol%E6%B0%8F%E6%8F%90%E6%A1%88%20Muted%EF%BC%89
 COLORREF colors[] = {
@@ -49,6 +51,10 @@ void home::DrawPie(HDC hdc, int x, int y, int width, Item* items, DWORD dwSize)
 		StrokeAndFillPath(hdc);
 		SelectObject(hdc, hOldBrush);
 		DeleteObject(hBrush);
+		RECT rect = {};
+		rect.left = rect.right = nX + (width / 1.8) * cos(2.0 * M_PI * (xStartAngle + items[i].dwValue * 360.0f / xMax / 2.0f) / 360.0f);
+		rect.top = rect.bottom = nY - (width / 1.8) * sin(2.0 * M_PI * (xStartAngle + items[i].dwValue * 360.0f / xMax / 2.0f) / 360.0f);
+		DrawText(hdc, items[i].lpszName, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
 		xStartAngle += items[i].dwValue * 360.0f / xMax;
 	}
 	SelectObject(hdc, hOldPen);
