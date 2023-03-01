@@ -4,7 +4,7 @@
 option::option()
 {
 	m_szClassName = TEXT("OptionWindow");
-	m_dwWindowStyle = WS_CHILD | WS_VISIBLE;
+	m_dwWindowStyle = WS_CHILD;
 }
 
 option::~option()

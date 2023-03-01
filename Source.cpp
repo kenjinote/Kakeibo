@@ -28,6 +28,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		win3 = new option;win3->create(hWnd);
 		win4 = new navi;win4->create(hWnd);
 		db = new database;db->CreateDatabase();
+		PostMessage(hWnd, WM_COMMAND, ID_HOME, 0);
 		break;
 	case WM_SIZE:
 		MoveWindow(win->GetWindowHandle(), 64, 0, LOWORD(lParam) - 64, HIWORD(lParam), 1);
@@ -69,7 +70,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPreInst, LPSTR pCmdLine, int nCmdShow)
+int WINAPI wWinMain(
+	_In_ HINSTANCE hInstance,
+	_In_opt_ HINSTANCE hPrevInstance,
+	_In_ LPWSTR lpCmdLine,
+	_In_ int nShowCmd)
 {
 	CoInitialize(0);
 	MSG msg;
@@ -86,9 +91,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPreInst, LPSTR pCmdLine, int 
 		szClassName
 	};
 	RegisterClass(&wndclass);
-	HWND hWnd = CreateWindow(
+	HWND hWnd = CreateWindowW(
 		szClassName,
-		TEXT("‰ÆŒv•ë"),
+		L"‰ÆŒv•ë",
 		WS_OVERLAPPEDWINDOW,
 		CW_USEDEFAULT,
 		0,

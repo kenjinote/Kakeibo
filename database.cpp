@@ -61,9 +61,9 @@ BOOL database::CompactDatabase()
 
 BOOL database::CreateTable()
 {
-	SQLExecute(TEXT("CREATE TABLE 名簿(名前 VARCHAR (255), 特技 VARCHAR (255));"));
-	SQLExecute(TEXT("INSERT INTO 名簿(名前,特技)VALUES('山田太郎','スイカ割り');"));
-	SQLExecute(TEXT("INSERT INTO 名簿(名前,特技)VALUES('山田花子','早口言葉');"));
+//	SQLExecute(TEXT("CREATE TABLE 名簿(名前 VARCHAR (255), 特技 VARCHAR (255));"));
+//	SQLExecute(TEXT("INSERT INTO 名簿(名前,特技)VALUES('山田太郎','スイカ割り');"));
+//	SQLExecute(TEXT("INSERT INTO 名簿(名前,特技)VALUES('山田花子','早口言葉');"));
 
 //	SQLExecute(TEXT("CREATE TABLE tblDate(日付 DATETIME, 項目 int NOT NULL, 価格 int NOT NULL);"));
 //	SQLExecute(TEXT("INSERT INTO tblDate(日付,項目,価格)VALUES('2015/10/10',0,5000);"));
@@ -73,6 +73,7 @@ BOOL database::CreateTable()
 
 BOOL database::SQLExecute(LPCTSTR lpszSQL)
 {
+	return FALSE;
 	HRESULT hr;
 	_ConnectionPtr pCon(NULL);
 	hr = pCon.CreateInstance(__uuidof(Connection));
@@ -95,6 +96,7 @@ BOOL database::SQLExecute(LPCTSTR lpszSQL)
 		pCommand->ActiveConnection = pCon;
 		pCommand->CommandText = lpszSQL;
 		pCommand->Execute(NULL, NULL, adCmdText);
+		pCommand.Release();
 	}
 	catch (_com_error&e)
 	{

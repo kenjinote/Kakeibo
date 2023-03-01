@@ -4,7 +4,7 @@
 window::window() : m_hWnd(NULL), m_szClassName(NULL), m_dwWindowStyle(0)
 {
 	m_szClassName = TEXT("Sample Class Name");
-	m_dwWindowStyle = WS_CHILD | WS_VISIBLE;
+	m_dwWindowStyle = WS_CHILD;
 }
 
 window::~window()

@@ -4,7 +4,7 @@
 input::input()
 {
 	m_szClassName = TEXT("InputWindow");
-	m_dwWindowStyle = WS_CHILD | WS_VISIBLE;
+	m_dwWindowStyle = WS_CHILD;
 }
 
 input::~input()
