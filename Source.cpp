@@ -46,7 +46,6 @@ struct CategoryItem {
     int parentId;
 };
 
-// 追加: トランザクション詳細用
 struct TransactionDetail {
     int id;
     std::wstring date;
@@ -141,6 +140,7 @@ public:
 };
 
 WNDPROC g_OldListBoxProc = NULL;
+WNDPROC g_OldEditProc = NULL;
 int g_DragSourceIdx = -1;
 int g_LastInsertIdx = -1;
 bool g_IsDragging = false;
@@ -408,7 +408,6 @@ public:
         AddCategory(category, type, 0);
     }
 
-    // 追加: 指定した日のトランザクション一覧
     std::vector<TransactionDetail> GetTransactionsForDate(const std::wstring& date) {
         std::vector<TransactionDetail> result;
         char dateUtf8[32];
@@ -431,7 +430,6 @@ public:
         return result;
     }
 
-    // 追加: 削除
     void DeleteTransaction(int id) {
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "DELETE FROM transactions WHERE id = ?", -1, &stmt, NULL) == SQLITE_OK) {
@@ -441,7 +439,6 @@ public:
         sqlite3_finalize(stmt);
     }
 
-    // 追加: 更新
     void UpdateTransaction(int id, const std::wstring& category, float amount, int type) {
         char catUtf8[256];
         WideCharToMultiByte(CP_UTF8, 0, category.c_str(), -1, catUtf8, 256, NULL, NULL);
@@ -610,7 +607,7 @@ public:
         if (!pRT) { pFactory->CreateHwndRenderTarget(D2D1::RenderTargetProperties(), D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(rc.right, rc.bottom)), &pRT); pRT->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &pBrush); }
         pRT->BeginDraw();
         pRT->Clear(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-        float sidebarWidth = 280.0f; // 少し広げた
+        float sidebarWidth = 280.0f;
         D2D1_SIZE_F size = pRT->GetSize();
 
         if (!m_currentDrillParent.empty()) {
@@ -789,7 +786,7 @@ private:
 };
 
 // -----------------------------------------------------------------------------
-// 3. Settings Window (修正版: 中央表示対応)
+// 3. Settings Window
 // -----------------------------------------------------------------------------
 class SettingsWindow {
 public:
@@ -802,19 +799,9 @@ public:
         pDB = db; currentType = TYPE_EXPENSE;
         WNDCLASS wc = { 0 }; wc.lpfnWndProc = Proc; wc.hInstance = GetModuleHandle(NULL); wc.lpszClassName = L"SettingsWnd"; wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); RegisterClass(&wc);
 
-        // --- 修正箇所: 座標計算 ---
-        int w = 420;
-        int h = 600;
-        int x = 150;
-        int y = 150;
-
-        if (hParent) {
-            RECT rc;
-            GetWindowRect(hParent, &rc);
-            x = rc.left + (rc.right - rc.left - w) / 2;
-            y = rc.top + (rc.bottom - rc.top - h) / 2;
-        }
-        // ------------------------
+        int w = 420; int h = 600;
+        int x = 150; int y = 150;
+        if (hParent) { RECT rc; GetWindowRect(hParent, &rc); x = rc.left + (rc.right - rc.left - w) / 2; y = rc.top + (rc.bottom - rc.top - h) / 2; }
 
         HWND hWnd = CreateWindow(L"SettingsWnd", L"カテゴリ編集・削除", WS_VISIBLE | WS_SYSMENU | WS_CAPTION | WS_POPUPWINDOW,
             x, y, w, h, hParent, NULL, wc.hInstance, NULL);
@@ -959,6 +946,24 @@ ExpenseManager* SettingsWindow::pDB = nullptr;
 int SettingsWindow::currentType = TYPE_EXPENSE;
 std::vector<CategoryItem> SettingsWindow::s_currentItems;
 
+LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_GETDLGCODE) {
+        LRESULT result = CallWindowProc(g_OldEditProc, hwnd, msg, wp, lp);
+        if (lp) {
+            MSG* pMsg = (MSG*)lp;
+            if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN) {
+                return result | DLGC_WANTALLKEYS;
+            }
+        }
+        return result;
+    }
+    if (msg == WM_KEYDOWN && wp == VK_RETURN) {
+        SendMessage(GetParent(hwnd), WM_COMMAND, MAKEWPARAM(100, BN_CLICKED), (LPARAM)GetDlgItem(GetParent(hwnd), 100));
+        return 0;
+    }
+    return CallWindowProc(g_OldEditProc, hwnd, msg, wp, lp);
+}
+
 // -----------------------------------------------------------------------------
 // InputPanel (View/Controller)
 // -----------------------------------------------------------------------------
@@ -967,20 +972,22 @@ public:
     HWND hCalendar, hComboCat, hEditAmt, hBtnAdd, hBtnSettings;
     HWND hRadioMonth, hRadioYear, hRadioPie, hRadioLine;
     HWND hRadioExp, hRadioInc;
-    HWND hListTrans; // 追加: 明細リスト
+    HWND hListTrans;
     ExpenseManager* pDB;
-    int m_editingId; // 追加: 編集中のID (-1なら新規)
+    int m_editingId;
 
     InputPanel() : m_editingId(-1) {}
 
     void Create(HWND parent, ExpenseManager* db) {
         pDB = db;
-        hCalendar = CreateWindowEx(0, MONTHCAL_CLASS, L"", WS_CHILD | WS_VISIBLE | MCS_NOTODAYCIRCLE, 10, 10, 240, 160, parent, (HMENU)200, NULL, NULL);
+        // Tab移動のため WS_TABSTOP を追加
+        hCalendar = CreateWindowEx(0, MONTHCAL_CLASS, L"", WS_CHILD | WS_VISIBLE | MCS_NOTODAYCIRCLE | WS_TABSTOP, 10, 10, 240, 160, parent, (HMENU)200, NULL, NULL);
 
         int y = 180;
         CreateWindow(L"BUTTON", L"区分", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 10, y, 220, 50, parent, NULL, NULL, NULL);
 
-        hRadioExp = CreateWindow(L"BUTTON", L"支出", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP,
+        // ラジオボタンの先頭に WS_TABSTOP (WS_GROUPがあるためグループ間移動は矢印キー)
+        hRadioExp = CreateWindow(L"BUTTON", L"支出", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP,
             20, y + 20, 80, 20, parent, (HMENU)400, NULL, NULL);
 
         hRadioInc = CreateWindow(L"BUTTON", L"収入", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
@@ -990,20 +997,20 @@ public:
 
         y += 60;
         CreateWindow(L"STATIC", L"カテゴリ:", WS_CHILD | WS_VISIBLE, 20, y, 200, 20, parent, NULL, NULL, NULL);
-        hComboCat = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWN | CBS_AUTOHSCROLL, 20, y + 20, 160, 200, parent, NULL, NULL, NULL);
-        hBtnSettings = CreateWindow(L"BUTTON", L"設定", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 190, y + 19, 40, 25, parent, (HMENU)ID_BTN_SETTINGS, NULL, NULL);
+        hComboCat = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_TABSTOP, 20, y + 20, 160, 200, parent, NULL, NULL, NULL);
+        hBtnSettings = CreateWindow(L"BUTTON", L"設定", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, 190, y + 19, 40, 25, parent, (HMENU)ID_BTN_SETTINGS, NULL, NULL);
 
         y += 50;
         CreateWindow(L"STATIC", L"金額:", WS_CHILD | WS_VISIBLE, 20, y, 200, 20, parent, NULL, NULL, NULL);
         hEditAmt = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_NUMBER, 20, y + 20, 210, 25, parent, NULL, NULL, NULL);
+        g_OldEditProc = (WNDPROC)SetWindowLongPtr(hEditAmt, GWLP_WNDPROC, (LONG_PTR)EditProc);
 
         y += 50;
-        hBtnAdd = CreateWindow(L"BUTTON", L"登録", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 20, y, 210, 30, parent, (HMENU)100, NULL, NULL);
+        hBtnAdd = CreateWindow(L"BUTTON", L"登録", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, 20, y, 210, 30, parent, (HMENU)100, NULL, NULL);
 
-        // --- リストビューの追加 ---
         y += 40;
         CreateWindow(L"STATIC", L"【選択日の明細】(右クリックで操作)", WS_CHILD | WS_VISIBLE, 10, y, 240, 20, parent, NULL, NULL, NULL);
-        hListTrans = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTVIEW, L"", WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
+        hListTrans = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTVIEW, L"", WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_TABSTOP,
             10, y + 20, 240, 150, parent, (HMENU)105, NULL, NULL);
         ListView_SetExtendedListViewStyle(hListTrans, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
 
@@ -1015,21 +1022,20 @@ public:
         ListView_InsertColumn(hListTrans, 1, &lvc);
         lvc.fmt = LVCFMT_CENTER; lvc.cx = 40; lvc.pszText = (LPWSTR)L"種別";
         ListView_InsertColumn(hListTrans, 2, &lvc);
-        // ------------------------
 
         y += 180;
         CreateWindow(L"BUTTON", L"集計設定", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 10, y, 240, 80, parent, NULL, NULL, NULL);
-        hRadioMonth = CreateWindow(L"BUTTON", L"月間", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 20, y + 20, 60, 25, parent, (HMENU)101, NULL, NULL);
+        hRadioMonth = CreateWindow(L"BUTTON", L"月間", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 20, y + 20, 60, 25, parent, (HMENU)101, NULL, NULL);
         hRadioYear = CreateWindow(L"BUTTON", L"年間", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 90, y + 20, 60, 25, parent, (HMENU)102, NULL, NULL);
         SendMessage(hRadioMonth, BM_SETCHECK, BST_CHECKED, 0);
 
-        hRadioPie = CreateWindow(L"BUTTON", L"円グラフ", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 20, y + 45, 80, 25, parent, (HMENU)103, NULL, NULL);
+        hRadioPie = CreateWindow(L"BUTTON", L"円グラフ", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 20, y + 45, 80, 25, parent, (HMENU)103, NULL, NULL);
         hRadioLine = CreateWindow(L"BUTTON", L"推移", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 110, y + 45, 60, 25, parent, (HMENU)104, NULL, NULL);
         SendMessage(hRadioPie, BM_SETCHECK, BST_CHECKED, 0);
 
         ApplyFont(parent);
         UpdateCategoryList();
-        RefreshTransactionList(); // 初期表示
+        RefreshTransactionList();
     }
 
     void ApplyFont(HWND parent) {
@@ -1047,9 +1053,12 @@ public:
         for (const auto& item : items) {
             SendMessage(hComboCat, CB_ADDSTRING, 0, (LPARAM)item.name.c_str());
         }
+        // 修正: リスト更新後に一番上を選択する
+        if (!items.empty()) {
+            SendMessage(hComboCat, CB_SETCURSEL, 0, 0);
+        }
     }
 
-    // リストビューの更新
     void RefreshTransactionList() {
         ListView_DeleteAllItems(hListTrans);
         std::wstring date = GetSelectedDate();
@@ -1062,7 +1071,7 @@ public:
             lvi.iItem = i;
             lvi.iSubItem = 0;
             lvi.pszText = (LPWSTR)item.category.c_str();
-            lvi.lParam = item.id; // IDを保持
+            lvi.lParam = item.id;
             ListView_InsertItem(hListTrans, &lvi);
 
             wchar_t amtStr[32];
@@ -1072,10 +1081,9 @@ public:
             ListView_SetItemText(hListTrans, i, 2, (item.type == TYPE_INCOME) ? L"収" : L"支");
             i++;
         }
-        CancelEditMode(); // 日付変更等のタイミングで編集モード解除
+        CancelEditMode();
     }
 
-    // 編集モード開始
     void StartEditMode(int id, const std::wstring& cat, float amt, int type) {
         m_editingId = id;
         SetWindowText(hComboCat, cat.c_str());
@@ -1089,11 +1097,10 @@ public:
             SendMessage(hRadioExp, BM_SETCHECK, BST_CHECKED, 0);
             SendMessage(hRadioInc, BM_SETCHECK, BST_UNCHECKED, 0);
         }
-        UpdateCategoryList(); // 区分変更に伴いカテゴリ再ロード
+        UpdateCategoryList();
         SetWindowText(hBtnAdd, L"修正");
     }
 
-    // 編集モード解除
     void CancelEditMode() {
         m_editingId = -1;
         SetWindowText(hEditAmt, L"");
@@ -1131,7 +1138,6 @@ private:
     InputPanel inputPanel;
     HWND hWnd;
 
-    // ヘルパー: リスト選択項目のID取得
     LPARAM GetTransactionIdFromList(int idx) {
         LVITEM lvi = { 0 };
         lvi.iItem = idx;
@@ -1140,7 +1146,6 @@ private:
         return lvi.lParam;
     }
 
-    // ヘルパー: リスト選択項目のテキスト取得
     std::wstring GetTransactionTextFromList(int idx, int subItem) {
         wchar_t buf[256];
         ListView_GetItemText(inputPanel.hListTrans, idx, subItem, buf, 256);
@@ -1163,8 +1168,15 @@ public:
         hWnd = CreateWindow(L"KakeiboAppV4", L"家計簿アプリ v7.0",
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1150, 750, NULL, NULL, hInstance, this);
         ShowWindow(hWnd, SW_SHOW);
+
+        // 修正: Tabキー移動のためのIsDialogMessageの追加
         MSG msg;
-        while (GetMessage(&msg, NULL, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }
+        while (GetMessage(&msg, NULL, 0, 0)) {
+            if (!IsDialogMessage(hWnd, &msg)) {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+        }
     }
 
 private:
@@ -1190,21 +1202,19 @@ private:
             return 0;
 
         case WM_COMMAND:
-            if (LOWORD(wp) == 100) { // 登録・修正ボタン
+            if (LOWORD(wp) == 100) {
                 std::wstring cat; float amt; int type;
                 if (inputPanel.GetInput(cat, amt, type)) {
                     if (inputPanel.m_editingId == -1) {
-                        // 新規登録
                         dbManager.AddTransaction(inputPanel.GetSelectedDate(), cat, amt, type);
                     }
                     else {
-                        // 修正
                         dbManager.UpdateTransaction(inputPanel.m_editingId, cat, amt, type);
                         inputPanel.CancelEditMode();
                     }
                     SetWindowText(inputPanel.hEditAmt, L"");
                     inputPanel.UpdateCategoryList();
-                    inputPanel.RefreshTransactionList(); // リスト更新
+                    inputPanel.RefreshTransactionList();
                     InvalidateRect(hWnd, NULL, FALSE);
                 }
             }
@@ -1213,8 +1223,7 @@ private:
                 inputPanel.UpdateCategoryList();
                 InvalidateRect(hWnd, NULL, FALSE);
             }
-            // コンテキストメニューからのコマンド処理
-            if (LOWORD(wp) == 2001) { // 修正
+            if (LOWORD(wp) == 2001) {
                 int idx = ListView_GetNextItem(inputPanel.hListTrans, -1, LVNI_SELECTED);
                 if (idx != -1) {
                     int id = (int)GetTransactionIdFromList(idx);
@@ -1225,7 +1234,7 @@ private:
                     inputPanel.StartEditMode(id, cat, amt, type);
                 }
             }
-            if (LOWORD(wp) == 2002) { // 削除
+            if (LOWORD(wp) == 2002) {
                 int idx = ListView_GetNextItem(inputPanel.hListTrans, -1, LVNI_SELECTED);
                 if (idx != -1) {
                     if (MessageBox(hWnd, L"選択した明細を削除しますか？", L"確認", MB_YESNO | MB_ICONWARNING) == IDYES) {
@@ -1238,8 +1247,7 @@ private:
             }
 
             if (HIWORD(wp) == BN_CLICKED) {
-                // ラジオボタン等のクリックでリスト更新が必要な場合
-                if (LOWORD(wp) == 400 || LOWORD(wp) == 401) { // 区分変更
+                if (LOWORD(wp) == 400 || LOWORD(wp) == 401) {
                     inputPanel.UpdateCategoryList();
                 }
                 canvas.DrillUp();
@@ -1250,12 +1258,10 @@ private:
         case WM_NOTIFY:
         {
             LPNMHDR pnm = (LPNMHDR)lp;
-            // カレンダーの日付変更検知
             if (pnm->code == MCN_SELECT) {
                 inputPanel.RefreshTransactionList();
                 InvalidateRect(hWnd, NULL, FALSE);
             }
-            // リストビューの右クリック検知
             if (pnm->hwndFrom == inputPanel.hListTrans && pnm->code == NM_RCLICK) {
                 int idx = ListView_GetNextItem(inputPanel.hListTrans, -1, LVNI_SELECTED);
                 if (idx != -1) {
