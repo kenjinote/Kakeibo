@@ -11,6 +11,10 @@
 #include <ctime>
 #include "sqlite3.h"
 
+// モダンなコントロール外観のため
+#include <uxtheme.h>
+#pragma comment(lib, "uxtheme.lib")
+
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "shlwapi.lib")
@@ -20,11 +24,34 @@
 #pragma comment(linker,"\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 // -----------------------------------------------------------------------------
-// 定数・構造体
+// 定数・構造体・カラーパレット
 // -----------------------------------------------------------------------------
 enum ReportMode { MODE_MONTHLY, MODE_YEARLY };
 enum GraphType { GRAPH_PIE, GRAPH_LINE };
 enum TransType { TYPE_EXPENSE = 0, TYPE_INCOME = 1 };
+
+// モダンカラーパレット
+namespace ColorPalette {
+    const D2D1_COLOR_F Background = { 0.96f, 0.96f, 0.97f, 1.0f }; // #F5F5F7 (Off-White)
+    const D2D1_COLOR_F Sidebar = { 1.0f, 1.0f, 1.0f, 1.0f };       // #FFFFFF
+    const D2D1_COLOR_F Card = { 1.0f, 1.0f, 1.0f, 1.0f };          // #FFFFFF
+    const D2D1_COLOR_F TextPrimary = { 0.11f, 0.11f, 0.12f, 1.0f };// #1C1C1E
+    const D2D1_COLOR_F TextSecondary = { 0.55f, 0.55f, 0.57f, 1.0f }; // #8E8E93
+    const D2D1_COLOR_F AccentBlue = { 0.0f, 0.48f, 1.0f, 1.0f };   // iOS Blue
+    const D2D1_COLOR_F Separator = { 0.90f, 0.90f, 0.92f, 1.0f };
+
+    // グラフ用パステルカラー
+    const D2D1_COLOR_F Graph[] = {
+        {0.35f, 0.78f, 0.98f, 1.0f}, // Sky Blue
+        {1.0f,  0.58f, 0.63f, 1.0f}, // Pastel Red
+        {0.49f, 0.83f, 0.58f, 1.0f}, // Mint
+        {1.0f,  0.84f, 0.38f, 1.0f}, // Pastel Yellow
+        {0.73f, 0.62f, 0.91f, 1.0f}, // Lavender
+        {1.0f,  0.71f, 0.51f, 1.0f}, // Peach
+        {0.50f, 0.50f, 0.50f, 1.0f}, // Gray
+        {0.25f, 0.25f, 0.25f, 1.0f}  // Dark Gray
+    };
+}
 
 struct TransactionSummary {
     std::wstring label;
@@ -66,7 +93,7 @@ const int ID_BTN_UPDATE_CAT = 307;
 const int ID_BTN_DELETE_CAT = 308;
 
 // -----------------------------------------------------------------------------
-// ドラッグ＆ドロップ用ヘルパー
+// ドラッグ＆ドロップ用ヘルパー (変更なし)
 // -----------------------------------------------------------------------------
 class DragImageWindow {
     HWND hWindow;
@@ -100,7 +127,7 @@ public:
         HBITMAP hOldBm = (HBITMAP)SelectObject(hdcMem, hBm);
 
         RECT bgRc = { 0, 0, width, height };
-        HBRUSH hBr = CreateSolidBrush(RGB(240, 240, 255));
+        HBRUSH hBr = CreateSolidBrush(RGB(245, 245, 250)); // Slightly modern color
         FillRect(hdcMem, &bgRc, hBr);
         DeleteObject(hBr);
 
@@ -113,13 +140,13 @@ public:
         OffsetRect(&textRc, 5, 0);
         DrawText(hdcMem, buf.data(), -1, &textRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-        HBRUSH frameBr = CreateSolidBrush(RGB(100, 100, 200));
+        HBRUSH frameBr = CreateSolidBrush(RGB(0, 122, 255)); // Blue Accent
         FrameRect(hdcMem, &textRc, frameBr);
         DeleteObject(frameBr);
 
         POINT ptSrc = { 0, 0 };
         SIZE wndSize = { width, height };
-        BLENDFUNCTION blend = { AC_SRC_OVER, 0, 180, 0 };
+        BLENDFUNCTION blend = { AC_SRC_OVER, 0, 200, 0 }; // More opacity
         UpdateLayeredWindow(hWindow, hdcScreen, NULL, &wndSize, hdcMem, &ptSrc, 0, &blend, ULW_ALPHA);
 
         SelectObject(hdcMem, hOldBm);
@@ -158,7 +185,7 @@ void DrawInsertLine(HWND hwnd, int idx) {
     }
     else { ReleaseDC(hwnd, hdc); return; }
 
-    HPEN hPen = CreatePen(PS_SOLID, 3, RGB(255, 0, 0));
+    HPEN hPen = CreatePen(PS_SOLID, 2, RGB(0, 122, 255)); // Blue Accent
     HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
     MoveToEx(hdc, rc.left, rc.top, NULL);
     LineTo(hdc, rc.right, rc.top);
@@ -223,7 +250,7 @@ LRESULT CALLBACK ListBoxProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 // -----------------------------------------------------------------------------
-// 1. ExpenseManager (Model)
+// 1. ExpenseManager (Model) - 変更なし
 // -----------------------------------------------------------------------------
 class ExpenseManager {
 private:
@@ -490,14 +517,10 @@ public:
         }
         sqlite3_finalize(stmt);
 
-        D2D1_COLOR_F palette[] = {
-            {0.29f, 0.56f, 0.85f, 1.0f}, {0.92f, 0.30f, 0.30f, 1.0f}, {0.33f, 0.73f, 0.44f, 1.0f}, {0.95f, 0.77f, 0.06f, 1.0f},
-            {0.61f, 0.40f, 0.80f, 1.0f}, {0.20f, 0.80f, 0.80f, 1.0f}, {0.90f, 0.50f, 0.20f, 1.0f}, {0.60f, 0.60f, 0.60f, 1.0f}
-        };
         int idx = 0;
         for (auto const& [name, amount] : sums) {
             bool children = parentCategoryName.empty() && isParent[name];
-            result.push_back({ name, amount, palette[idx % 8], children });
+            result.push_back({ name, amount, ColorPalette::Graph[idx % 8], children });
             idx++;
         }
         std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.amount > b.amount; });
@@ -538,7 +561,8 @@ private:
     ID2D1HwndRenderTarget* pRT;
     ID2D1SolidColorBrush* pBrush;
     IDWriteFactory* pDWFactory;
-    IDWriteTextFormat* pTxtFormat;
+    IDWriteTextFormat* pTxtTitle;
+    IDWriteTextFormat* pTxtNormal;
     IDWriteTextFormat* pTxtSmall;
     IDWriteTextFormat* pTxtLegend;
     D2D1_POINT_2F m_mousePos;
@@ -548,23 +572,30 @@ private:
     std::wstring m_lastHoveredName;
 
 public:
-    ChartCanvas() : pFactory(NULL), pRT(NULL), pBrush(NULL), pDWFactory(NULL), pTxtFormat(NULL), pTxtSmall(NULL), pTxtLegend(NULL) {
+    ChartCanvas() : pFactory(NULL), pRT(NULL), pBrush(NULL), pDWFactory(NULL), pTxtTitle(NULL), pTxtNormal(NULL), pTxtSmall(NULL), pTxtLegend(NULL) {
         m_mousePos = D2D1::Point2F(-1, -1);
         GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_SDECIMAL, m_decimalSep, 4);
         GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_STHOUSAND, m_thousandSep, 4);
     }
     ~ChartCanvas() {
         if (pRT) pRT->Release(); if (pBrush) pBrush->Release(); if (pFactory) pFactory->Release();
-        if (pTxtFormat) pTxtFormat->Release(); if (pTxtSmall) pTxtSmall->Release(); if (pTxtLegend) pTxtLegend->Release();
+        if (pTxtTitle) pTxtTitle->Release(); if (pTxtNormal) pTxtNormal->Release();
+        if (pTxtSmall) pTxtSmall->Release(); if (pTxtLegend) pTxtLegend->Release();
         if (pDWFactory) pDWFactory->Release();
     }
 
     void Initialize() {
         D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &pFactory);
         DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown**)&pDWFactory);
-        pDWFactory->CreateTextFormat(L"Meiryo UI", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 16.0f, L"ja-jp", &pTxtFormat);
-        pDWFactory->CreateTextFormat(L"Meiryo UI", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 11.0f, L"ja-jp", &pTxtSmall);
-        pDWFactory->CreateTextFormat(L"Meiryo UI", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"ja-jp", &pTxtLegend);
+
+        // フォントを Segoe UI (モダン標準) に変更
+        const wchar_t* fontName = L"Segoe UI";
+
+        pDWFactory->CreateTextFormat(fontName, NULL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 24.0f, L"ja-jp", &pTxtTitle);
+        pDWFactory->CreateTextFormat(fontName, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0f, L"ja-jp", &pTxtNormal);
+        pDWFactory->CreateTextFormat(fontName, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.0f, L"ja-jp", &pTxtSmall);
+        pDWFactory->CreateTextFormat(fontName, NULL, DWRITE_FONT_WEIGHT_MEDIUM, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"ja-jp", &pTxtLegend);
+
         pTxtSmall->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     }
 
@@ -585,20 +616,29 @@ public:
     }
 
     void DrawTooltip(const wchar_t* text, D2D1_SIZE_F size) {
-        float tipW = 140.0f; float tipH = 50.0f;
-        float tipX = m_mousePos.x + 20; float tipY = m_mousePos.y - tipH - 5;
-        if (tipY < 0) tipY = m_mousePos.y + 20;
+        float tipW = 160.0f; float tipH = 60.0f;
+        float tipX = m_mousePos.x + 15; float tipY = m_mousePos.y - tipH - 5;
+        if (tipY < 0) tipY = m_mousePos.y + 15;
         if (tipX + tipW > size.width) tipX = m_mousePos.x - tipW - 10;
         D2D1_RECT_F tipRect = D2D1::RectF(tipX, tipY, tipX + tipW, tipY + tipH);
 
-        pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.2f));
-        pRT->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(tipX + 3, tipY + 3, tipX + tipW + 3, tipY + tipH + 3), 5, 5), pBrush);
-        pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
-        pRT->FillRoundedRectangle(D2D1::RoundedRect(tipRect, 5, 5), pBrush);
-        pBrush->SetColor(D2D1::ColorF(0.4f, 0.4f, 0.4f));
-        pRT->DrawRoundedRectangle(D2D1::RoundedRect(tipRect, 5, 5), pBrush, 1.0f);
-        pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 1.0f));
-        pRT->DrawText(text, (UINT32)wcslen(text), pTxtSmall, tipRect, pBrush);
+        // Shadow
+        pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.1f));
+        pRT->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(tipX + 2, tipY + 2, tipX + tipW + 2, tipY + tipH + 2), 6, 6), pBrush);
+
+        // BG
+        pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.95f));
+        pRT->FillRoundedRectangle(D2D1::RoundedRect(tipRect, 6, 6), pBrush);
+
+        // Border
+        pBrush->SetColor(ColorPalette::Separator);
+        pRT->DrawRoundedRectangle(D2D1::RoundedRect(tipRect, 6, 6), pBrush, 1.0f);
+
+        // Text
+        pBrush->SetColor(ColorPalette::TextPrimary);
+        D2D1_RECT_F txtRect = tipRect;
+        txtRect.left += 10; txtRect.top += 8;
+        pRT->DrawText(text, (UINT32)wcslen(text), pTxtNormal, txtRect, pBrush);
     }
 
     void Render(HWND hwnd, ExpenseManager& db, const std::wstring& start, const std::wstring& end, std::wstring title, GraphType gType, ReportMode rMode, int currentType) {
@@ -606,37 +646,71 @@ public:
         RECT rc; GetClientRect(hwnd, &rc);
         if (!pRT) { pFactory->CreateHwndRenderTarget(D2D1::RenderTargetProperties(), D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(rc.right, rc.bottom)), &pRT); pRT->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &pBrush); }
         pRT->BeginDraw();
-        pRT->Clear(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-        float sidebarWidth = 280.0f;
+
+        // 背景クリア
+        pRT->Clear(ColorPalette::Background);
+
         D2D1_SIZE_F size = pRT->GetSize();
 
+        // レイアウト定義
+        float sidebarWidth = 300.0f; // サイドバーを少し広く
+        float margin = 20.0f;
+
+        // サイドバー背景
+        pBrush->SetColor(ColorPalette::Sidebar);
+        pRT->FillRectangle(D2D1::RectF(0, 0, sidebarWidth, size.height), pBrush);
+
+        // 区切り線
+        pBrush->SetColor(ColorPalette::Separator);
+        pRT->DrawLine(D2D1::Point2F(sidebarWidth, 0), D2D1::Point2F(sidebarWidth, size.height), pBrush, 1.0f);
+
+        // グラフエリアのカード背景
+        float graphLeft = sidebarWidth + margin;
+        float graphTop = margin;
+        float graphRight = size.width - margin;
+        float graphBottom = size.height - margin;
+        D2D1_RECT_F graphRect = D2D1::RectF(graphLeft, graphTop, graphRight, graphBottom);
+
+        pBrush->SetColor(ColorPalette::Card);
+        pRT->FillRoundedRectangle(D2D1::RoundedRect(graphRect, 10, 10), pBrush);
+
+        // カードのボーダー（薄く）
+        pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.05f));
+        pRT->DrawRoundedRectangle(D2D1::RoundedRect(graphRect, 10, 10), pBrush, 1.0f);
+
+        // タイトル
+        float contentPadding = 30.0f;
         if (!m_currentDrillParent.empty()) {
             title += L" (" + m_currentDrillParent + L")";
-            pBrush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f));
-            pRT->DrawText(L"※右クリックで戻る", 9, pTxtSmall, D2D1::RectF(sidebarWidth + 20, 50, size.width, 70), pBrush);
+            pBrush->SetColor(ColorPalette::TextSecondary);
+            pRT->DrawText(L"← 右クリックで戻る", 10, pTxtSmall, D2D1::RectF(graphLeft + contentPadding, graphTop + 60, graphRight, graphTop + 80), pBrush);
         }
-        pBrush->SetColor(D2D1::ColorF(0.2f, 0.2f, 0.2f));
-        pRT->DrawText(title.c_str(), (UINT32)title.length(), pTxtFormat, D2D1::RectF(sidebarWidth + 20, 20, size.width, 50), pBrush);
+        pBrush->SetColor(ColorPalette::TextPrimary);
+        pRT->DrawText(title.c_str(), (UINT32)title.length(), pTxtTitle, D2D1::RectF(graphLeft + contentPadding, graphTop + contentPadding, graphRight, graphTop + 80), pBrush);
+
+        // グラフ描画領域
+        D2D1_RECT_F chartArea = D2D1::RectF(graphLeft + contentPadding, graphTop + 80, graphRight - contentPadding, graphBottom - contentPadding);
 
         if (gType == GRAPH_PIE) {
             auto data = db.GetPieData(start, end, currentType, m_currentDrillParent);
-            DrawPieChart(data, sidebarWidth, size, currentType);
+            DrawPieChart(data, chartArea, currentType);
         }
         else {
             auto data = db.GetLineData(start, end, rMode);
-            DrawLineChart(data, sidebarWidth, size, rMode);
+            DrawLineChart(data, chartArea, rMode);
         }
         pRT->EndDraw();
     }
 
 private:
-    void DrawPieChart(const std::vector<TransactionSummary>& data, float sidebarWidth, D2D1_SIZE_F size, int type) {
-        float legendWidth = 200.0f;
-        float chartAreaWidth = size.width - sidebarWidth - legendWidth;
-        if (chartAreaWidth < 100.0f) { legendWidth = 0.0f; chartAreaWidth = size.width - sidebarWidth; }
-        D2D1_POINT_2F center = D2D1::Point2F(sidebarWidth + chartAreaWidth / 2.0f, size.height / 2.0f);
-        float radius = min(chartAreaWidth, size.height) * 0.35f;
-        if (radius < 1.0f) return;
+    void DrawPieChart(const std::vector<TransactionSummary>& data, D2D1_RECT_F area, int type) {
+        float legendWidth = 220.0f;
+        float chartW = (area.right - area.left) - legendWidth;
+        float chartH = area.bottom - area.top;
+        if (chartW < 100) { legendWidth = 0; chartW = area.right - area.left; }
+
+        D2D1_POINT_2F center = D2D1::Point2F(area.left + chartW / 2.0f, area.top + chartH / 2.0f);
+        float radius = min(chartW, chartH) * 0.4f;
 
         float total = 0; for (const auto& d : data) total += d.amount;
         const TransactionSummary* pHoveredItem = nullptr;
@@ -658,67 +732,84 @@ private:
                         isHovered = true; pHoveredItem = &d; m_lastHoveredName = d.label; hoveredPercentage = (d.amount / total) * 100.0f;
                     }
                 }
+
+                // ドーナツチャート風にするためにPathを工夫することも可能だが、ここでは円グラフのまま質感を上げる
                 ID2D1PathGeometry* pPath = NULL; pFactory->CreatePathGeometry(&pPath);
                 ID2D1GeometrySink* pSink = NULL; pPath->Open(&pSink);
+
+                float drawRadius = isHovered ? radius * 1.05f : radius;
                 pSink->BeginFigure(center, D2D1_FIGURE_BEGIN_FILLED);
+
                 float radStart = startAngle * (PI / 180.0f);
                 float radEnd = (startAngle + sweepAngle) * (PI / 180.0f);
-                float drawRadius = isHovered ? radius * 1.05f : radius;
 
-                if (sweepAngle >= 360.0f) {
-                    pSink->AddLine(D2D1::Point2F(center.x + drawRadius * cos(radStart), center.y + drawRadius * sin(radStart)));
-                    pSink->AddArc(D2D1::ArcSegment(D2D1::Point2F(center.x + drawRadius * cos(radStart + PI), center.y + drawRadius * sin(radStart + PI)), D2D1::SizeF(drawRadius, drawRadius), 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_LARGE));
-                    pSink->AddArc(D2D1::ArcSegment(D2D1::Point2F(center.x + drawRadius * cos(radEnd), center.y + drawRadius * sin(radEnd)), D2D1::SizeF(drawRadius, drawRadius), 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_LARGE));
-                }
-                else {
-                    pSink->AddLine(D2D1::Point2F(center.x + drawRadius * cos(radStart), center.y + drawRadius * sin(radStart)));
-                    pSink->AddArc(D2D1::ArcSegment(D2D1::Point2F(center.x + drawRadius * cos(radEnd), center.y + drawRadius * sin(radEnd)), D2D1::SizeF(drawRadius, drawRadius), 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE, sweepAngle > 180.0f ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
-                }
+                pSink->AddLine(D2D1::Point2F(center.x + drawRadius * cos(radStart), center.y + drawRadius * sin(radStart)));
+                pSink->AddArc(D2D1::ArcSegment(D2D1::Point2F(center.x + drawRadius * cos(radEnd), center.y + drawRadius * sin(radEnd)), D2D1::SizeF(drawRadius, drawRadius), 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE, sweepAngle > 180.0f ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
+
                 pSink->EndFigure(D2D1_FIGURE_END_CLOSED); pSink->Close();
+
                 pBrush->SetColor(d.color); pRT->FillGeometry(pPath, pBrush);
-                pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f)); pRT->DrawGeometry(pPath, pBrush, 2.0f);
+                pBrush->SetColor(ColorPalette::Card); pRT->DrawGeometry(pPath, pBrush, 1.5f); // 白い境界線でモダンに
+
                 pPath->Release(); pSink->Release();
                 startAngle += sweepAngle;
             }
 
+            // 合計金額表示
+            std::wstring moneyStr = FormatMoney(total);
+            wchar_t totalStr[64]; swprintf_s(totalStr, L"%s合計\n¥%s", (type == TYPE_INCOME) ? L"収入" : L"支出", moneyStr.c_str());
+
+            // 中央に白い円を描いてドーナツグラフにする（モダン化）
+            float holeRadius = radius * 0.5f;
+            pBrush->SetColor(ColorPalette::Card);
+            pRT->FillEllipse(D2D1::Ellipse(center, holeRadius, holeRadius), pBrush);
+
+            // 中央テキスト
+            pTxtTitle->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            pBrush->SetColor(ColorPalette::TextPrimary);
+            pRT->DrawText(totalStr, (UINT32)wcslen(totalStr), pTxtTitle, D2D1::RectF(center.x - holeRadius, center.y - 30, center.x + holeRadius, center.y + 30), pBrush);
+
+            // 凡例
             if (legendWidth > 0) {
-                float legendX = sidebarWidth + chartAreaWidth + 20; float legendY = 100.0f;
-                pBrush->SetColor(D2D1::ColorF(0.2f, 0.2f, 0.2f));
-                wchar_t legendTitle[32]; swprintf_s(legendTitle, L"【%s内訳】", (type == TYPE_INCOME) ? L"収入" : L"支出");
-                pRT->DrawText(legendTitle, (UINT32)wcslen(legendTitle), pTxtLegend, D2D1::RectF(legendX, legendY - 25, size.width, size.height), pBrush);
+                float legendX = area.left + chartW + 20; float legendY = area.top + 40;
+
+                pTxtLegend->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                pBrush->SetColor(ColorPalette::TextSecondary);
+                pRT->DrawText(L"カテゴリ内訳", 6, pTxtLegend, D2D1::RectF(legendX, legendY - 25, area.right, area.bottom), pBrush);
+
                 for (const auto& d : data) {
-                    pBrush->SetColor(d.color); pRT->FillRectangle(D2D1::RectF(legendX, legendY + 2, legendX + 16, legendY + 18), pBrush);
+                    pBrush->SetColor(d.color);
+                    pRT->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(legendX, legendY + 4, legendX + 12, legendY + 16), 2, 2), pBrush);
+
                     std::wstring label = d.label;
                     if (d.hasChildren) label += L" (+)";
-                    pBrush->SetColor(D2D1::ColorF(0.1f, 0.1f, 0.1f));
-                    pRT->DrawText(label.c_str(), (UINT32)label.length(), pTxtLegend, D2D1::RectF(legendX + 25, legendY, size.width, legendY + 20), pBrush);
-                    legendY += 25.0f;
+
+                    pBrush->SetColor(ColorPalette::TextPrimary);
+                    pRT->DrawText(label.c_str(), (UINT32)label.length(), pTxtNormal, D2D1::RectF(legendX + 20, legendY, area.right, legendY + 20), pBrush);
+                    legendY += 28.0f;
                 }
             }
-            std::wstring moneyStr = FormatMoney(total);
-            wchar_t totalStr[64]; swprintf_s(totalStr, L"%s合計: ¥%s", (type == TYPE_INCOME) ? L"収入" : L"支出", moneyStr.c_str());
-            pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f));
-            pRT->DrawText(totalStr, (UINT32)wcslen(totalStr), pTxtFormat, D2D1::RectF(center.x - 80, center.y + radius + 30, size.width, size.height), pBrush);
-
+            // ツールチップ
             if (pHoveredItem) {
                 std::wstring tipMoney = FormatMoney(pHoveredItem->amount);
                 wchar_t tipText[128];
                 std::wstring hint = pHoveredItem->hasChildren ? L"\n(クリックで詳細)" : L"";
                 swprintf_s(tipText, L"%s\n¥%s (%.1f%%)%s", pHoveredItem->label.c_str(), tipMoney.c_str(), hoveredPercentage, hint.c_str());
-                DrawTooltip(tipText, size);
+                DrawTooltip(tipText, pRT->GetSize());
             }
         }
         else {
-            pBrush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f));
-            wchar_t msg[64]; swprintf_s(msg, L"%sデータなし", (type == TYPE_INCOME) ? L"収入" : L"支出");
-            pRT->DrawText(msg, (UINT32)wcslen(msg), pTxtFormat, D2D1::RectF(center.x - 50, center.y, size.width, size.height), pBrush);
+            pBrush->SetColor(ColorPalette::TextSecondary);
+            pTxtTitle->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            pRT->DrawText(L"データがありません", 9, pTxtTitle, D2D1::RectF(center.x - 100, center.y, center.x + 100, center.y + 50), pBrush);
         }
     }
 
-    void DrawLineChart(const std::vector<TimeSeriesData>& data, float sidebarWidth, D2D1_SIZE_F size, ReportMode rMode) {
-        float left = sidebarWidth + 80; float right = size.width - 50; float top = 80; float bottom = size.height - 50;
+    void DrawLineChart(const std::vector<TimeSeriesData>& data, D2D1_RECT_F area, ReportMode rMode) {
+        float left = area.left + 50; float right = area.right - 20; float top = area.top + 20; float bottom = area.bottom - 40;
         float width = right - left; float height = bottom - top;
         if (width <= 0 || height <= 0) return;
+
         float maxVal = 1000.0f;
         for (const auto& d : data) { if (d.income > maxVal) maxVal = d.income; if (d.expense > maxVal) maxVal = d.expense; }
         float magnitude = (float)pow(10, floor(log10(maxVal))); maxVal = ceil(maxVal / magnitude) * magnitude; if (maxVal == 0) maxVal = 1000;
@@ -727,33 +818,30 @@ private:
         pTxtSmall->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         for (int i = 0; i <= divY; i++) {
             float val = maxVal * i / divY; float y = bottom - (val / maxVal) * height;
-            pBrush->SetColor(D2D1::ColorF(0.9f, 0.9f, 0.9f)); pRT->DrawLine(D2D1::Point2F(left, y), D2D1::Point2F(right, y), pBrush, 1.0f);
+            pBrush->SetColor(ColorPalette::Separator); pRT->DrawLine(D2D1::Point2F(left, y), D2D1::Point2F(right, y), pBrush, 1.0f);
             std::wstring labelStr = FormatMoney(val);
-            pBrush->SetColor(D2D1::ColorF(0.4f, 0.4f, 0.4f)); pRT->DrawText(labelStr.c_str(), (UINT32)labelStr.length(), pTxtSmall, D2D1::RectF(sidebarWidth, y - 8, left - 5, y + 8), pBrush);
+            pBrush->SetColor(ColorPalette::TextSecondary); pRT->DrawText(labelStr.c_str(), (UINT32)labelStr.length(), pTxtSmall, D2D1::RectF(area.left, y - 8, left - 10, y + 8), pBrush);
         }
-        pRT->DrawText(L"(円)", 3, pTxtSmall, D2D1::RectF(sidebarWidth, top - 20, left - 5, top), pBrush);
 
         int maxTime = (rMode == MODE_MONTHLY) ? 31 : 12;
         float stepX = width / (float)maxTime;
+
         pTxtSmall->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        pBrush->SetColor(D2D1::ColorF(0.6f, 0.6f, 0.6f));
-        pRT->DrawLine(D2D1::Point2F(left, bottom), D2D1::Point2F(right, bottom), pBrush, 2.0f); pRT->DrawLine(D2D1::Point2F(left, top), D2D1::Point2F(left, bottom), pBrush, 2.0f);
         for (int i = 1; i <= maxTime; i++) {
             float x = left + (i - 1) * stepX;
             bool showLabel = (rMode == MODE_YEARLY) || (i == 1 || i % 5 == 0 || i == maxTime);
             if (showLabel) {
-                pBrush->SetColor(D2D1::ColorF(0.6f, 0.6f, 0.6f)); pRT->DrawLine(D2D1::Point2F(x, bottom), D2D1::Point2F(x, bottom + 5), pBrush, 1.0f);
-                wchar_t buf[16]; swprintf_s(buf, L"%d", i); pRT->DrawText(buf, (UINT32)wcslen(buf), pTxtSmall, D2D1::RectF(x - 15, bottom + 5, x + 15, bottom + 25), pBrush);
+                wchar_t buf[16]; swprintf_s(buf, L"%d", i);
+                pRT->DrawText(buf, (UINT32)wcslen(buf), pTxtSmall, D2D1::RectF(x - 15, bottom + 5, x + 15, bottom + 25), pBrush);
             }
         }
-        wchar_t unit[8]; wcscpy_s(unit, (rMode == MODE_MONTHLY) ? L"(日)" : L"(月)"); pRT->DrawText(unit, (UINT32)wcslen(unit), pTxtSmall, D2D1::RectF(right + 5, bottom + 5, right + 40, bottom + 25), pBrush);
 
         if (data.empty()) return;
         std::vector<float> incMap(maxTime + 1, 0), expMap(maxTime + 1, 0);
         for (const auto& d : data) { if (d.timeUnit >= 1 && d.timeUnit <= maxTime) { incMap[d.timeUnit] = d.income; expMap[d.timeUnit] = d.expense; } }
 
         struct HitPoint { float x, y, val; int time; bool isInc; D2D1_COLOR_F color; };
-        HitPoint bestHit = { 0 }; bool isHit = false; float minHitDist = 15.0f;
+        HitPoint bestHit = { 0 }; bool isHit = false; float minHitDist = 20.0f;
 
         auto ProcessPolyLine = [&](const std::vector<float>& values, D2D1_COLOR_F color, bool isInc) {
             ID2D1PathGeometry* pPath = NULL; pFactory->CreatePathGeometry(&pPath); ID2D1GeometrySink* pSink = NULL; pPath->Open(&pSink);
@@ -762,31 +850,42 @@ private:
                 float x = left + (i - 1) * stepX; float val = values[i]; float y = bottom - (val / maxVal) * height;
                 if (first) { pSink->BeginFigure(D2D1::Point2F(x, y), D2D1_FIGURE_BEGIN_HOLLOW); first = false; }
                 else { pSink->AddLine(D2D1::Point2F(x, y)); }
-                pBrush->SetColor(color); pRT->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x, y), 3.0f, 3.0f), pBrush);
+
+                // ヒットテスト用の点は透明な円として計算だけする
                 float dx = m_mousePos.x - x; float dy = m_mousePos.y - y; float dist = sqrt(dx * dx + dy * dy);
                 if (dist < minHitDist) { minHitDist = dist; bestHit = { x, y, val, i, isInc, color }; isHit = true; }
             }
             pSink->EndFigure(D2D1_FIGURE_END_OPEN); pSink->Close();
-            pBrush->SetColor(color); pRT->DrawGeometry(pPath, pBrush, 2.0f); pPath->Release(); pSink->Release();
+            pBrush->SetColor(color); pRT->DrawGeometry(pPath, pBrush, 3.0f); // 太い線でモダンに
+            pPath->Release(); pSink->Release();
             };
-        ProcessPolyLine(incMap, D2D1::ColorF(0.2f, 0.6f, 0.9f), true); ProcessPolyLine(expMap, D2D1::ColorF(0.9f, 0.4f, 0.4f), false);
 
-        pTxtSmall->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-        pBrush->SetColor(D2D1::ColorF(0.2f, 0.6f, 0.9f)); pRT->DrawText(L"■ 収入", 4, pTxtFormat, D2D1::RectF(right - 100, top - 30, right, top), pBrush);
-        pBrush->SetColor(D2D1::ColorF(0.9f, 0.4f, 0.4f)); pRT->DrawText(L"■ 支出", 4, pTxtFormat, D2D1::RectF(right - 50, top - 30, right + 50, top), pBrush);
+        ProcessPolyLine(incMap, ColorPalette::Graph[0], true);
+        ProcessPolyLine(expMap, ColorPalette::Graph[1], false);
+
+        // 凡例表示（グラフエリア内上部）
+        pTxtLegend->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        float lx = right - 150; float ly = top;
+        pBrush->SetColor(ColorPalette::Graph[0]); pRT->FillEllipse(D2D1::Ellipse(D2D1::Point2F(lx, ly + 7), 4, 4), pBrush);
+        pBrush->SetColor(ColorPalette::TextPrimary); pRT->DrawText(L"収入", 2, pTxtLegend, D2D1::RectF(lx + 10, ly, lx + 50, ly + 20), pBrush);
+
+        lx += 60;
+        pBrush->SetColor(ColorPalette::Graph[1]); pRT->FillEllipse(D2D1::Ellipse(D2D1::Point2F(lx, ly + 7), 4, 4), pBrush);
+        pBrush->SetColor(ColorPalette::TextPrimary); pRT->DrawText(L"支出", 2, pTxtLegend, D2D1::RectF(lx + 10, ly, lx + 50, ly + 20), pBrush);
 
         if (isHit) {
-            pBrush->SetColor(bestHit.color); pRT->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bestHit.x, bestHit.y), 6.0f, 6.0f), pBrush);
-            pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f)); pRT->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(bestHit.x, bestHit.y), 6.0f, 6.0f), pBrush, 2.0f);
+            pBrush->SetColor(ColorPalette::Card); pRT->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bestHit.x, bestHit.y), 6.0f, 6.0f), pBrush);
+            pBrush->SetColor(bestHit.color); pRT->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(bestHit.x, bestHit.y), 6.0f, 6.0f), pBrush, 3.0f);
+
             std::wstring hitValStr = FormatMoney(bestHit.val); wchar_t tipText[128]; wchar_t unit[4]; wcscpy_s(unit, (rMode == MODE_MONTHLY) ? L"日" : L"月");
             swprintf_s(tipText, L"%d%s (%s)\n¥%s", bestHit.time, unit, bestHit.isInc ? L"収入" : L"支出", hitValStr.c_str());
-            DrawTooltip(tipText, size);
+            DrawTooltip(tipText, pRT->GetSize());
         }
     }
 };
 
 // -----------------------------------------------------------------------------
-// 3. Settings Window
+// 3. Settings Window - レイアウト微調整
 // -----------------------------------------------------------------------------
 class SettingsWindow {
 public:
@@ -799,11 +898,11 @@ public:
         pDB = db; currentType = TYPE_EXPENSE;
         WNDCLASS wc = { 0 }; wc.lpfnWndProc = Proc; wc.hInstance = GetModuleHandle(NULL); wc.lpszClassName = L"SettingsWnd"; wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); RegisterClass(&wc);
 
-        int w = 420; int h = 600;
+        int w = 450; int h = 600;
         int x = 150; int y = 150;
         if (hParent) { RECT rc; GetWindowRect(hParent, &rc); x = rc.left + (rc.right - rc.left - w) / 2; y = rc.top + (rc.bottom - rc.top - h) / 2; }
 
-        HWND hWnd = CreateWindow(L"SettingsWnd", L"カテゴリ編集・削除", WS_VISIBLE | WS_SYSMENU | WS_CAPTION | WS_POPUPWINDOW,
+        HWND hWnd = CreateWindow(L"SettingsWnd", L"カテゴリ編集", WS_VISIBLE | WS_SYSMENU | WS_CAPTION | WS_POPUPWINDOW,
             x, y, w, h, hParent, NULL, wc.hInstance, NULL);
 
         EnableWindow(hParent, FALSE);
@@ -829,30 +928,56 @@ public:
     static LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         switch (msg) {
         case WM_CREATE:
-            CreateWindow(L"BUTTON", L"区分", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 10, 10, 380, 50, hwnd, NULL, NULL, NULL);
-            hRadioExp = CreateWindow(L"BUTTON", L"支出", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 20, 30, 80, 20, hwnd, (HMENU)400, NULL, NULL);
-            hRadioInc = CreateWindow(L"BUTTON", L"収入", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 110, 30, 80, 20, hwnd, (HMENU)401, NULL, NULL);
+            CreateWindow(L"STATIC", L"区分を選択:", WS_CHILD | WS_VISIBLE, 20, 15, 100, 20, hwnd, NULL, NULL, NULL);
+            hRadioExp = CreateWindow(L"BUTTON", L"支出", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 20, 40, 80, 25, hwnd, (HMENU)400, NULL, NULL);
+            hRadioInc = CreateWindow(L"BUTTON", L"収入", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 110, 40, 80, 25, hwnd, (HMENU)401, NULL, NULL);
             SendMessage(hRadioExp, BM_SETCHECK, BST_CHECKED, 0);
-            hList = CreateWindow(L"LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY, 10, 70, 250, 300, hwnd, (HMENU)ID_LIST_CATS, NULL, NULL);
+
+            hList = CreateWindow(L"LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS, 20, 80, 280, 300, hwnd, (HMENU)ID_LIST_CATS, NULL, NULL);
             g_OldListBoxProc = (WNDPROC)SetWindowLongPtr(hList, GWLP_WNDPROC, (LONG_PTR)ListBoxProc);
-            CreateWindow(L"BUTTON", L"↑", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 270, 150, 40, 40, hwnd, (HMENU)ID_BTN_UP, NULL, NULL);
-            CreateWindow(L"BUTTON", L"↓", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 270, 200, 40, 40, hwnd, (HMENU)ID_BTN_DOWN, NULL, NULL);
-            CreateWindow(L"BUTTON", L"編集 / 追加", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 10, 380, 380, 160, hwnd, NULL, NULL, NULL);
-            CreateWindow(L"STATIC", L"名前:", WS_CHILD | WS_VISIBLE, 20, 405, 40, 20, hwnd, NULL, NULL, NULL);
-            hEditNew = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 70, 400, 150, 25, hwnd, (HMENU)ID_EDIT_NEW_CAT, NULL, NULL);
-            CreateWindow(L"STATIC", L"親:", WS_CHILD | WS_VISIBLE, 230, 405, 30, 20, hwnd, NULL, NULL, NULL);
-            hComboParent = CreateWindow(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 260, 400, 120, 200, hwnd, (HMENU)ID_COMBO_PARENT, NULL, NULL);
-            CreateWindow(L"BUTTON", L"新規追加", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 20, 440, 100, 30, hwnd, (HMENU)ID_BTN_ADD_CAT, NULL, NULL);
-            CreateWindow(L"BUTTON", L"変更を保存", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 130, 440, 100, 30, hwnd, (HMENU)ID_BTN_UPDATE_CAT, NULL, NULL);
-            CreateWindow(L"BUTTON", L"削除", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 240, 440, 100, 30, hwnd, (HMENU)ID_BTN_DELETE_CAT, NULL, NULL);
-            { HFONT hFont = CreateFont(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, SHIFTJIS_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Meiryo UI"); SendMessage(hList, WM_SETFONT, (WPARAM)hFont, TRUE); }
+            SetWindowTheme(hList, L"Explorer", NULL); // モダンなリストビュースタイル
+
+            CreateWindow(L"BUTTON", L"↑", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 310, 150, 40, 40, hwnd, (HMENU)ID_BTN_UP, NULL, NULL);
+            CreateWindow(L"BUTTON", L"↓", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 310, 200, 40, 40, hwnd, (HMENU)ID_BTN_DOWN, NULL, NULL);
+
+            CreateWindow(L"STATIC", L"編集 / 追加", WS_CHILD | WS_VISIBLE, 20, 400, 100, 20, hwnd, NULL, NULL, NULL);
+            CreateWindow(L"STATIC", L"名前:", WS_CHILD | WS_VISIBLE, 20, 425, 40, 20, hwnd, NULL, NULL, NULL);
+            hEditNew = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 70, 422, 160, 25, hwnd, (HMENU)ID_EDIT_NEW_CAT, NULL, NULL);
+
+            CreateWindow(L"STATIC", L"親:", WS_CHILD | WS_VISIBLE, 240, 425, 30, 20, hwnd, NULL, NULL, NULL);
+            hComboParent = CreateWindow(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 270, 422, 140, 200, hwnd, (HMENU)ID_COMBO_PARENT, NULL, NULL);
+
+            CreateWindow(L"BUTTON", L"新規追加", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 20, 460, 100, 30, hwnd, (HMENU)ID_BTN_ADD_CAT, NULL, NULL);
+            CreateWindow(L"BUTTON", L"変更を保存", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 130, 460, 100, 30, hwnd, (HMENU)ID_BTN_UPDATE_CAT, NULL, NULL);
+            CreateWindow(L"BUTTON", L"削除", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 240, 460, 100, 30, hwnd, (HMENU)ID_BTN_DELETE_CAT, NULL, NULL);
+
+            {
+                HFONT hFont = CreateFont(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, SHIFTJIS_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+                EnumChildWindows(hwnd, [](HWND h, LPARAM l) { SendMessage(h, WM_SETFONT, l, TRUE); return TRUE; }, (LPARAM)hFont);
+            }
             RefreshList();
             return 0;
         case WM_APP + 1: {
             int srcIdx = (int)wp; int dstIdx = (int)lp;
             if (srcIdx < 0 || dstIdx < 0 || dstIdx == srcIdx + 1) return 0;
-            if (dstIdx > srcIdx) { for (int i = srcIdx; i < dstIdx - 1; i++) { CategoryItem& a = s_currentItems[i]; CategoryItem& b = s_currentItems[i + 1]; pDB->SwapCategoryOrder(a.id, a.sortOrder, b.id, b.sortOrder); std::swap(s_currentItems[i], s_currentItems[i + 1]); } }
-            else { for (int i = srcIdx; i > dstIdx; i--) { CategoryItem& a = s_currentItems[i]; CategoryItem& b = s_currentItems[i - 1]; pDB->SwapCategoryOrder(a.id, a.sortOrder, b.id, b.sortOrder); std::swap(s_currentItems[i], s_currentItems[i - 1]); } }
+            if (dstIdx > srcIdx) {
+                for (int i = srcIdx; i < dstIdx - 1; i++) {
+                    CategoryItem& a = s_currentItems[i];
+                    CategoryItem& b = s_currentItems[i + 1];
+                    pDB->SwapCategoryOrder(a.id, a.sortOrder, b.id, b.sortOrder);
+                    std::swap(a.sortOrder, b.sortOrder);
+                    std::swap(s_currentItems[i], s_currentItems[i + 1]);
+                }
+            }
+            else {
+                for (int i = srcIdx; i > dstIdx; i--) {
+                    CategoryItem& a = s_currentItems[i];
+                    CategoryItem& b = s_currentItems[i - 1];
+                    pDB->SwapCategoryOrder(a.id, a.sortOrder, b.id, b.sortOrder);
+                    std::swap(a.sortOrder, b.sortOrder);
+                    std::swap(s_currentItems[i], s_currentItems[i - 1]);
+                }
+            }
             RefreshList();
             return 0;
         }
@@ -912,7 +1037,9 @@ public:
         if (listIdx == LB_ERR) return;
         int currentId = (int)SendMessage(hList, LB_GETITEMDATA, listIdx, 0);
         int currentVecIdx = -1;
-        for (int i = 0; i < (int)s_currentItems.size(); i++) { if (s_currentItems[i].id == currentId) { currentVecIdx = i; break; } }
+        for (int i = 0; i < (int)s_currentItems.size(); i++) {
+            if (s_currentItems[i].id == currentId) { currentVecIdx = i; break; }
+        }
         if (currentVecIdx == -1) return;
         CategoryItem& current = s_currentItems[currentVecIdx];
         int targetVecIdx = -1;
@@ -932,7 +1059,13 @@ public:
         }
         if (targetVecIdx != -1) {
             CategoryItem& target = s_currentItems[targetVecIdx];
-            pDB->SwapCategoryOrder(current.id, current.sortOrder, target.id, target.sortOrder);
+            int ordCurrent = current.sortOrder;
+            int ordTarget = target.sortOrder;
+            if (ordCurrent == ordTarget) {
+                if (dir > 0) { ordTarget++; }
+                else { ordCurrent++; }
+            }
+            pDB->SwapCategoryOrder(current.id, ordCurrent, target.id, ordTarget);
             RefreshList(currentId);
         }
     }
@@ -965,7 +1098,7 @@ LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 // -----------------------------------------------------------------------------
-// InputPanel (View/Controller)
+// InputPanel (View/Controller) - サイドバー風レイアウトに変更
 // -----------------------------------------------------------------------------
 class InputPanel {
 public:
@@ -980,57 +1113,67 @@ public:
 
     void Create(HWND parent, ExpenseManager* db) {
         pDB = db;
-        // Tab移動のため WS_TABSTOP を追加
-        hCalendar = CreateWindowEx(0, MONTHCAL_CLASS, L"", WS_CHILD | WS_VISIBLE | MCS_NOTODAYCIRCLE | WS_TABSTOP, 10, 10, 240, 160, parent, (HMENU)200, NULL, NULL);
+        int mx = 20; // margin x
+        int y = 20;  // current y
 
-        int y = 180;
-        CreateWindow(L"BUTTON", L"区分", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 10, y, 220, 50, parent, NULL, NULL, NULL);
+        hCalendar = CreateWindowEx(0, MONTHCAL_CLASS, L"", WS_CHILD | WS_VISIBLE | MCS_NOTODAYCIRCLE | WS_TABSTOP, mx, y, 260, 160, parent, (HMENU)200, NULL, NULL);
 
-        // ラジオボタンの先頭に WS_TABSTOP (WS_GROUPがあるためグループ間移動は矢印キー)
-        hRadioExp = CreateWindow(L"BUTTON", L"支出", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP,
-            20, y + 20, 80, 20, parent, (HMENU)400, NULL, NULL);
+        y += 180;
+        CreateWindow(L"STATIC", L"収支区分", WS_CHILD | WS_VISIBLE, mx, y, 200, 20, parent, NULL, NULL, NULL);
 
-        hRadioInc = CreateWindow(L"BUTTON", L"収入", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-            110, y + 20, 80, 20, parent, (HMENU)401, NULL, NULL);
+        y += 25;
+        hRadioExp = CreateWindow(L"BUTTON", L"支出", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_FLAT | WS_GROUP | WS_TABSTOP,
+            mx, y, 80, 25, parent, (HMENU)400, NULL, NULL);
+
+        hRadioInc = CreateWindow(L"BUTTON", L"収入", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_FLAT,
+            mx + 90, y, 80, 25, parent, (HMENU)401, NULL, NULL);
 
         SendMessage(hRadioExp, BM_SETCHECK, BST_CHECKED, 0);
 
-        y += 60;
-        CreateWindow(L"STATIC", L"カテゴリ:", WS_CHILD | WS_VISIBLE, 20, y, 200, 20, parent, NULL, NULL, NULL);
-        hComboCat = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_TABSTOP, 20, y + 20, 160, 200, parent, NULL, NULL, NULL);
-        hBtnSettings = CreateWindow(L"BUTTON", L"設定", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, 190, y + 19, 40, 25, parent, (HMENU)ID_BTN_SETTINGS, NULL, NULL);
+        y += 35;
+        CreateWindow(L"STATIC", L"カテゴリ", WS_CHILD | WS_VISIBLE, mx, y, 200, 20, parent, NULL, NULL, NULL);
+        y += 22;
+        hComboCat = CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_TABSTOP, mx, y, 180, 200, parent, NULL, NULL, NULL);
+        hBtnSettings = CreateWindow(L"BUTTON", L"設定", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_FLAT | WS_TABSTOP, mx + 190, y - 1, 60, 27, parent, (HMENU)ID_BTN_SETTINGS, NULL, NULL);
 
-        y += 50;
-        CreateWindow(L"STATIC", L"金額:", WS_CHILD | WS_VISIBLE, 20, y, 200, 20, parent, NULL, NULL, NULL);
-        hEditAmt = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_NUMBER, 20, y + 20, 210, 25, parent, NULL, NULL, NULL);
+        y += 35;
+        CreateWindow(L"STATIC", L"金額", WS_CHILD | WS_VISIBLE, mx, y, 200, 20, parent, NULL, NULL, NULL);
+        y += 22;
+        hEditAmt = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_NUMBER, mx, y, 250, 28, parent, NULL, NULL, NULL);
         g_OldEditProc = (WNDPROC)SetWindowLongPtr(hEditAmt, GWLP_WNDPROC, (LONG_PTR)EditProc);
 
-        y += 50;
-        hBtnAdd = CreateWindow(L"BUTTON", L"登録", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, 20, y, 210, 30, parent, (HMENU)100, NULL, NULL);
-
         y += 40;
-        CreateWindow(L"STATIC", L"【選択日の明細】(右クリックで操作)", WS_CHILD | WS_VISIBLE, 10, y, 240, 20, parent, NULL, NULL, NULL);
+        hBtnAdd = CreateWindow(L"BUTTON", L"登録する", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_FLAT | WS_TABSTOP, mx, y, 250, 35, parent, (HMENU)100, NULL, NULL);
+
+        y += 50;
+        CreateWindow(L"STATIC", L"選択日の明細 (右クリック操作)", WS_CHILD | WS_VISIBLE, mx, y, 250, 20, parent, NULL, NULL, NULL);
+        y += 22;
         hListTrans = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTVIEW, L"", WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_TABSTOP,
-            10, y + 20, 240, 150, parent, (HMENU)105, NULL, NULL);
-        ListView_SetExtendedListViewStyle(hListTrans, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+            mx, y, 250, 160, parent, (HMENU)105, NULL, NULL);
+        ListView_SetExtendedListViewStyle(hListTrans, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+        SetWindowTheme(hListTrans, L"Explorer", NULL); // モダンなリストビュー
 
         LVCOLUMN lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
-        lvc.fmt = LVCFMT_LEFT; lvc.cx = 100; lvc.pszText = (LPWSTR)L"カテゴリ";
+        lvc.fmt = LVCFMT_LEFT; lvc.cx = 110; lvc.pszText = (LPWSTR)L"カテゴリ";
         ListView_InsertColumn(hListTrans, 0, &lvc);
         lvc.fmt = LVCFMT_RIGHT; lvc.cx = 80; lvc.pszText = (LPWSTR)L"金額";
         ListView_InsertColumn(hListTrans, 1, &lvc);
-        lvc.fmt = LVCFMT_CENTER; lvc.cx = 40; lvc.pszText = (LPWSTR)L"種別";
+        lvc.fmt = LVCFMT_CENTER; lvc.cx = 40; lvc.pszText = (LPWSTR)L"種";
         ListView_InsertColumn(hListTrans, 2, &lvc);
 
         y += 180;
-        CreateWindow(L"BUTTON", L"集計設定", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 10, y, 240, 80, parent, NULL, NULL, NULL);
-        hRadioMonth = CreateWindow(L"BUTTON", L"月間", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 20, y + 20, 60, 25, parent, (HMENU)101, NULL, NULL);
-        hRadioYear = CreateWindow(L"BUTTON", L"年間", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 90, y + 20, 60, 25, parent, (HMENU)102, NULL, NULL);
+        // 区切り線的ラベル
+        CreateWindow(L"STATIC", L"集計オプション", WS_CHILD | WS_VISIBLE, mx, y, 200, 20, parent, NULL, NULL, NULL);
+
+        y += 25;
+        hRadioMonth = CreateWindow(L"BUTTON", L"月間", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_FLAT | WS_GROUP | WS_TABSTOP, mx, y, 60, 25, parent, (HMENU)101, NULL, NULL);
+        hRadioYear = CreateWindow(L"BUTTON", L"年間", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_FLAT, mx + 70, y, 60, 25, parent, (HMENU)102, NULL, NULL);
         SendMessage(hRadioMonth, BM_SETCHECK, BST_CHECKED, 0);
 
-        hRadioPie = CreateWindow(L"BUTTON", L"円グラフ", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 20, y + 45, 80, 25, parent, (HMENU)103, NULL, NULL);
-        hRadioLine = CreateWindow(L"BUTTON", L"推移", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 110, y + 45, 60, 25, parent, (HMENU)104, NULL, NULL);
+        y += 30;
+        hRadioPie = CreateWindow(L"BUTTON", L"円グラフ", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_FLAT | WS_GROUP | WS_TABSTOP, mx, y, 80, 25, parent, (HMENU)103, NULL, NULL);
+        hRadioLine = CreateWindow(L"BUTTON", L"推移", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_FLAT, mx + 90, y, 60, 25, parent, (HMENU)104, NULL, NULL);
         SendMessage(hRadioPie, BM_SETCHECK, BST_CHECKED, 0);
 
         ApplyFont(parent);
@@ -1039,11 +1182,14 @@ public:
     }
 
     void ApplyFont(HWND parent) {
-        HFONT hFont = CreateFont(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, SHIFTJIS_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Meiryo UI");
+        // Segoe UI に変更し、サイズを調整
+        HFONT hFont = CreateFont(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, SHIFTJIS_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
         EnumChildWindows(parent, [](HWND hwnd, LPARAM lparam) -> BOOL {
             SendMessage(hwnd, WM_SETFONT, (WPARAM)lparam, TRUE);
             return TRUE;
             }, (LPARAM)hFont);
+
+        // ヘッダーやボタンを太字にする場合は別途フォント作成が必要だが、ここでは一律適用
     }
 
     void UpdateCategoryList() {
@@ -1053,7 +1199,6 @@ public:
         for (const auto& item : items) {
             SendMessage(hComboCat, CB_ADDSTRING, 0, (LPARAM)item.name.c_str());
         }
-        // 修正: リスト更新後に一番上を選択する
         if (!items.empty()) {
             SendMessage(hComboCat, CB_SETCURSEL, 0, 0);
         }
@@ -1098,13 +1243,13 @@ public:
             SendMessage(hRadioInc, BM_SETCHECK, BST_UNCHECKED, 0);
         }
         UpdateCategoryList();
-        SetWindowText(hBtnAdd, L"修正");
+        SetWindowText(hBtnAdd, L"修正保存");
     }
 
     void CancelEditMode() {
         m_editingId = -1;
         SetWindowText(hEditAmt, L"");
-        SetWindowText(hBtnAdd, L"登録");
+        SetWindowText(hBtnAdd, L"登録する");
     }
 
     std::wstring GetSelectedDate() {
@@ -1154,6 +1299,9 @@ private:
 
 public:
     void Run(HINSTANCE hInstance) {
+        // 高DPI対応 (Windows 10 v1703+)
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
         InitCommonControls();
         dbManager.Initialize();
         canvas.Initialize();
@@ -1161,15 +1309,14 @@ public:
         wc.lpfnWndProc = MainApp::WndProc;
         wc.hInstance = hInstance;
         wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+        wc.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH); // 背景はD2Dで描画するので仮
         wc.lpszClassName = L"KakeiboAppV4";
         RegisterClass(&wc);
 
         hWnd = CreateWindow(L"KakeiboAppV4", L"家計簿アプリ v7.0",
-            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1150, 750, NULL, NULL, hInstance, this);
+            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1200, 800, NULL, NULL, hInstance, this);
         ShowWindow(hWnd, SW_SHOW);
 
-        // 修正: Tabキー移動のためのIsDialogMessageの追加
         MSG msg;
         while (GetMessage(&msg, NULL, 0, 0)) {
             if (!IsDialogMessage(hWnd, &msg)) {
@@ -1312,12 +1459,12 @@ private:
             if (rMode == MODE_MONTHLY) {
                 swprintf_s(start, L"%04d-%02d-01", st.wYear, st.wMonth);
                 swprintf_s(end, L"%04d-%02d-31", st.wYear, st.wMonth);
-                swprintf_s(title, L"【月間】%d年 %d月", st.wYear, st.wMonth);
+                swprintf_s(title, L"%d年 %d月 の収支", st.wYear, st.wMonth);
             }
             else {
                 swprintf_s(start, L"%04d-01-01", st.wYear);
                 swprintf_s(end, L"%04d-12-31", st.wYear);
-                swprintf_s(title, L"【年間】%d年", st.wYear);
+                swprintf_s(title, L"%d年 の収支", st.wYear);
             }
             canvas.Render(hWnd, dbManager, start, end, title, gType, rMode, currentType);
             ValidateRect(hWnd, NULL);
