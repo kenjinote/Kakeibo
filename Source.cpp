@@ -2,21 +2,20 @@
 #include <commctrl.h>
 #include <d2d1.h>
 #include <dwrite.h>
-#include <wrl.h> // ModernCalendarで使用
+#include <wrl.h>
 #include <vector>
 #include <string>
 #include <map>
+#include <set>
 #include <algorithm>
 #include <cstdio>
 #include <cmath>
 #include <ctime>
-#include <functional> // callback用
+#include <functional>
 #include "sqlite3.h"
 
-// モダンなコントロール外観のため
 #include <uxtheme.h>
 #pragma comment(lib, "uxtheme.lib")
-
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "shlwapi.lib")
@@ -28,15 +27,15 @@
 using namespace Microsoft::WRL;
 
 // -----------------------------------------------------------------------------
-// ModernCalendar Class (埋め込み)
+// ModernCalendar Class
 // -----------------------------------------------------------------------------
 namespace UiControls {
-    // 定数定義
-    const D2D1_COLOR_F COL_BG = D2D1::ColorF(1.0f, 1.0f, 1.0f); // サイドバーに合わせて白に
+    const D2D1_COLOR_F COL_BG = D2D1::ColorF(1.0f, 1.0f, 1.0f);
     const D2D1_COLOR_F COL_TEXT = D2D1::ColorF(0.11f, 0.11f, 0.12f);
     const D2D1_COLOR_F COL_TEXT_DIM = D2D1::ColorF(0.6f, 0.6f, 0.6f);
     const D2D1_COLOR_F COL_ACCENT = D2D1::ColorF(0.0f, 0.48f, 1.0f);
-    const D2D1_COLOR_F COL_HOVER = D2D1::ColorF(0.95f, 0.95f, 0.97f); // 薄いグレー
+    const D2D1_COLOR_F COL_HOVER = D2D1::ColorF(0.95f, 0.95f, 0.97f);
+    const D2D1_COLOR_F COL_MARKED = D2D1::ColorF(0.88f, 0.95f, 1.0f);
 
     enum class CalendarViewMode { Day, Month, Year };
     struct DateInfo { int year; int month; int day; };
@@ -51,26 +50,43 @@ namespace UiControls {
         }
         ~ModernCalendar() { DiscardDeviceResources(); }
 
+        void SetMarkedDays(int year, int month, const std::vector<int>& days) {
+            long long key = (long long)year * 100 + month;
+            m_markedData[key].clear();
+            for (int d : days) m_markedData[key].insert(d);
+            InvalidateRect(m_hwnd, NULL, FALSE);
+        }
+
         HRESULT Initialize(HWND hwndParent) {
             m_hwnd = hwndParent;
             HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, m_pD2DFactory.GetAddressOf());
             if (SUCCEEDED(hr)) hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(m_pDWriteFactory.GetAddressOf()));
-            if (SUCCEEDED(hr)) hr = m_pDWriteFactory->CreateTextFormat(L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 16.0f, L"ja-jp", m_pHeaderFormat.GetAddressOf());
+
+            // 【変更】ヘッダーフォント: 16.0f -> 22.0f
+            if (SUCCEEDED(hr)) hr = m_pDWriteFactory->CreateTextFormat(L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 22.0f, L"ja-jp", m_pHeaderFormat.GetAddressOf());
             if (SUCCEEDED(hr)) { m_pHeaderFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER); m_pHeaderFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER); }
-            if (SUCCEEDED(hr)) hr = m_pDWriteFactory->CreateTextFormat(L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"ja-jp", m_pContentFormat.GetAddressOf());
+
+            // 【変更】コンテンツフォント: 13.0f -> 17.0f
+            if (SUCCEEDED(hr)) hr = m_pDWriteFactory->CreateTextFormat(L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 17.0f, L"ja-jp", m_pContentFormat.GetAddressOf());
             if (SUCCEEDED(hr)) { m_pContentFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER); m_pContentFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER); }
             return hr;
         }
 
         void OnResize(UINT width, UINT height) { if (m_pRenderTarget) m_pRenderTarget->Resize(D2D1::SizeU(width, height)); }
         void OnPaint() { CreateDeviceResources(); if (m_pRenderTarget) Draw(); }
+
         void SetOnDateChanged(std::function<void(DateInfo)> callback) { m_onDateChangedCallback = callback; }
+        void SetOnViewChanged(std::function<void(int year, int month)> callback) { m_onViewChangedCallback = callback; }
+
         DateInfo GetSelectedDate() const { return { m_selectedYear, m_selectedMonth, m_selectedDay }; }
 
         void OnMouseMove(int x, int y) {
             if (m_isAnimating) return;
             int prev = m_hoveredIndex; m_hoveredIndex = -1;
-            float gridTop = m_contentRect.top + ((m_currentView == CalendarViewMode::Day) ? 30.0f : 0);
+
+            // 【変更】曜日表示の高さを 30.0f -> 35.0f に変更 (フォント拡大に伴う調整)
+            float gridTop = m_contentRect.top + ((m_currentView == CalendarViewMode::Day) ? 35.0f : 0);
+
             if (x >= m_contentRect.left && x <= m_contentRect.right && y >= gridTop && y <= m_contentRect.bottom) {
                 int cols = (m_currentView == CalendarViewMode::Day) ? 7 : 4;
                 int rows = (m_currentView == CalendarViewMode::Day) ? 6 : (m_currentView == CalendarViewMode::Month ? 3 : 4);
@@ -100,8 +116,14 @@ namespace UiControls {
                         InvalidateRect(m_hwnd, NULL, FALSE);
                     }
                 }
-                else if (m_currentView == CalendarViewMode::Month) { m_currentMonth = m_hoveredIndex + 1; StartViewTransition(CalendarViewMode::Day); }
-                else if (m_currentView == CalendarViewMode::Year) { m_currentYear = (m_currentYear - (m_currentYear % 16)) + m_hoveredIndex; StartViewTransition(CalendarViewMode::Month); }
+                else if (m_currentView == CalendarViewMode::Month) {
+                    m_currentMonth = m_hoveredIndex + 1;
+                    StartViewTransition(CalendarViewMode::Day);
+                }
+                else if (m_currentView == CalendarViewMode::Year) {
+                    m_currentYear = (m_currentYear - (m_currentYear % 16)) + m_hoveredIndex;
+                    StartViewTransition(CalendarViewMode::Month);
+                }
             }
         }
 
@@ -110,7 +132,24 @@ namespace UiControls {
         void OnTimer() {
             if (!m_isAnimating) return;
             DWORD t = GetTickCount(); m_animProgress = (t - m_animStartTime) / 250.0f;
-            if (m_animProgress >= 1.0f) { m_animProgress = 1.0f; m_isAnimating = false; KillTimer(m_hwnd, 1); }
+            if (m_animProgress >= 1.0f) {
+                m_animProgress = 1.0f; m_isAnimating = false; KillTimer(m_hwnd, 1);
+                if (m_currentView == CalendarViewMode::Day && m_onViewChangedCallback) {
+                    m_onViewChangedCallback(m_currentYear, m_currentMonth);
+                }
+            }
+            InvalidateRect(m_hwnd, NULL, FALSE);
+        }
+
+        void SetSelectedDate(int y, int m, int d) {
+            m_selectedYear = y;
+            m_selectedMonth = m;
+            m_selectedDay = d;
+
+            // 表示しているカレンダーのページも同期させる
+            m_currentYear = y;
+            m_currentMonth = m;
+
             InvalidateRect(m_hwnd, NULL, FALSE);
         }
 
@@ -119,7 +158,7 @@ namespace UiControls {
         ComPtr<ID2D1Factory> m_pD2DFactory;
         ComPtr<IDWriteFactory> m_pDWriteFactory;
         ComPtr<ID2D1HwndRenderTarget> m_pRenderTarget;
-        ComPtr<ID2D1SolidColorBrush> m_pTextBrush, m_pTextDimBrush, m_pAccentBrush, m_pHoverBrush;
+        ComPtr<ID2D1SolidColorBrush> m_pTextBrush, m_pTextDimBrush, m_pAccentBrush, m_pHoverBrush, m_pMarkedBrush;
         ComPtr<IDWriteTextFormat> m_pHeaderFormat, m_pContentFormat;
         CalendarViewMode m_currentView;
         int m_currentYear, m_currentMonth, m_selectedYear, m_selectedMonth, m_selectedDay, m_hoveredIndex;
@@ -128,9 +167,9 @@ namespace UiControls {
         float m_animProgress; DWORD m_animStartTime;
         struct Snap { CalendarViewMode v; int y; int m; } m_prev, m_next;
         enum AT { None, ZoomIn, ZoomOut, Next, Prev } m_at;
-
-        // 【修正】コールバック変数の定義を追加
+        std::map<long long, std::set<int>> m_markedData;
         std::function<void(DateInfo)> m_onDateChangedCallback;
+        std::function<void(int, int)> m_onViewChangedCallback;
 
         void CreateDeviceResources() {
             if (m_pRenderTarget) return;
@@ -141,20 +180,26 @@ namespace UiControls {
             m_pRenderTarget->CreateSolidColorBrush(COL_TEXT_DIM, m_pTextDimBrush.GetAddressOf());
             m_pRenderTarget->CreateSolidColorBrush(COL_ACCENT, m_pAccentBrush.GetAddressOf());
             m_pRenderTarget->CreateSolidColorBrush(COL_HOVER, m_pHoverBrush.GetAddressOf());
+            m_pRenderTarget->CreateSolidColorBrush(COL_MARKED, m_pMarkedBrush.GetAddressOf());
         }
-        void DiscardDeviceResources() { m_pRenderTarget.Reset(); m_pTextBrush.Reset(); m_pTextDimBrush.Reset(); m_pAccentBrush.Reset(); m_pHoverBrush.Reset(); }
+        void DiscardDeviceResources() {
+            m_pRenderTarget.Reset(); m_pTextBrush.Reset(); m_pTextDimBrush.Reset();
+            m_pAccentBrush.Reset(); m_pHoverBrush.Reset(); m_pMarkedBrush.Reset();
+        }
 
         void Draw() {
             m_pRenderTarget->BeginDraw(); m_pRenderTarget->Clear(COL_BG);
             D2D1_SIZE_F sz = m_pRenderTarget->GetSize();
+
+            // 【変更】ヘッダー高さを微調整、左右と下の余白(5px)を削除して画面いっぱいに使う
             m_headerRect = D2D1::RectF(0, 0, sz.width, 40);
-            m_contentRect = D2D1::RectF(5, 45, sz.width - 5, sz.height - 5);
+            m_contentRect = D2D1::RectF(0, 40, sz.width, sz.height);
+
             if (m_isAnimating) DrawAnim(sz); else DrawView(m_currentView, m_currentYear, m_currentMonth, 1, 1, 0);
             if (m_pRenderTarget->EndDraw() == D2DERR_RECREATE_TARGET) DiscardDeviceResources();
         }
 
         void DrawAnim(D2D1_SIZE_F sz) {
-            // 【修正】powの結果をfloatにキャスト
             float t = m_animProgress, e = 1.0f - (float)pow(1.0f - t, 3);
             D2D1_POINT_2F c = D2D1::Point2F(sz.width / 2, sz.height / 2);
             float os = 1, ns = 1, oo = 1, no = 0, oy = 0, ny = 0;
@@ -176,32 +221,53 @@ namespace UiControls {
                 swprintf_s(buf, L"%d年 %d月", y, m); m_pRenderTarget->DrawText(buf, wcslen(buf), m_pHeaderFormat.Get(), m_headerRect, m_pTextBrush.Get());
                 const wchar_t* wd[] = { L"日",L"月",L"火",L"水",L"木",L"金",L"土" };
                 float cw = (m_contentRect.right - m_contentRect.left) / 7;
-                for (int i = 0; i < 7; ++i) m_pRenderTarget->DrawText(wd[i], 1, m_pContentFormat.Get(), D2D1::RectF(m_contentRect.left + i * cw, m_contentRect.top, m_contentRect.left + (i + 1) * cw, m_contentRect.top + 30), m_pTextDimBrush.Get());
-                float gt = m_contentRect.top + 30, ch = (m_contentRect.bottom - gt) / 6;
+
+                // 【変更】曜日ヘッダーの高さを 30 -> 35 に変更
+                for (int i = 0; i < 7; ++i) m_pRenderTarget->DrawText(wd[i], 1, m_pContentFormat.Get(), D2D1::RectF(m_contentRect.left + i * cw, m_contentRect.top, m_contentRect.left + (i + 1) * cw, m_contentRect.top + 35), m_pTextDimBrush.Get());
+
+                // 【変更】グリッド開始位置も 30 -> 35 に変更
+                float gt = m_contentRect.top + 35;
+                float ch = (m_contentRect.bottom - gt) / 6;
                 int days = GetDaysInMonth(y, m), f = GetDayOfWeek(y, m, 1), idx = 0;
                 for (int r = 0; r < 6; ++r) for (int c = 0; c < 7; ++c) {
                     int d = idx - f + 1; idx++;
-                    if (d > 0 && d <= days) DrawCell(c, r, cw, ch, gt, std::to_wstring(d).c_str(), (d == m_selectedDay && m == m_selectedMonth && y == m_selectedYear), idx - 1 == m_hoveredIndex && !m_isAnimating);
+                    if (d > 0 && d <= days) DrawCell(c, r, cw, ch, gt, std::to_wstring(d).c_str(), (d == m_selectedDay && m == m_selectedMonth && y == m_selectedYear), idx - 1 == m_hoveredIndex && !m_isAnimating, y, m);
                 }
             }
+            // ... (Month/Year Viewのロジックは m_contentRect を参照するので自動的に広がる) ...
             else if (v == CalendarViewMode::Month) {
                 swprintf_s(buf, L"%d年", y); m_pRenderTarget->DrawText(buf, wcslen(buf), m_pHeaderFormat.Get(), m_headerRect, m_pTextBrush.Get());
                 float cw = (m_contentRect.right - m_contentRect.left) / 4, ch = (m_contentRect.bottom - m_contentRect.top) / 3;
-                for (int i = 0; i < 12; ++i) DrawCell(i % 4, i / 4, cw, ch, m_contentRect.top, (std::to_wstring(i + 1) + L"月").c_str(), (y == m_selectedYear && i + 1 == m_selectedMonth), i == m_hoveredIndex && !m_isAnimating);
+                for (int i = 0; i < 12; ++i) DrawCell(i % 4, i / 4, cw, ch, m_contentRect.top, (std::to_wstring(i + 1) + L"月").c_str(), (y == m_selectedYear && i + 1 == m_selectedMonth), i == m_hoveredIndex && !m_isAnimating, y, 0);
             }
             else {
                 int sy = y - (y % 16); swprintf_s(buf, L"%d - %d", sy, sy + 15); m_pRenderTarget->DrawText(buf, wcslen(buf), m_pHeaderFormat.Get(), m_headerRect, m_pTextBrush.Get());
                 float cw = (m_contentRect.right - m_contentRect.left) / 4, ch = (m_contentRect.bottom - m_contentRect.top) / 4;
-                for (int i = 0; i < 16; ++i) DrawCell(i % 4, i / 4, cw, ch, m_contentRect.top, std::to_wstring(sy + i).c_str(), (sy + i == m_selectedYear), i == m_hoveredIndex && !m_isAnimating);
+                for (int i = 0; i < 16; ++i) DrawCell(i % 4, i / 4, cw, ch, m_contentRect.top, std::to_wstring(sy + i).c_str(), (sy + i == m_selectedYear), i == m_hoveredIndex && !m_isAnimating, 0, 0);
             }
             m_pRenderTarget->PopLayer();
         }
 
-        void DrawCell(int c, int r, float w, float h, float t, const wchar_t* txt, bool sel, bool hov) {
+        void DrawCell(int c, int r, float w, float h, float t, const wchar_t* txt, bool sel, bool hov, int year, int month) {
             D2D1_RECT_F rc = D2D1::RectF(m_contentRect.left + c * w, t + r * h, m_contentRect.left + (c + 1) * w, t + (r + 1) * h);
             D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(rc.left + 2, rc.top + 2, rc.right - 2, rc.bottom - 2), 4, 4);
-            if (sel) { m_pRenderTarget->FillRoundedRectangle(rr, m_pAccentBrush.Get()); m_pRenderTarget->DrawText(txt, wcslen(txt), m_pContentFormat.Get(), rc, m_pTextBrush.Get()); }
-            else { if (hov) m_pRenderTarget->FillRoundedRectangle(rr, m_pHoverBrush.Get()); m_pRenderTarget->DrawText(txt, wcslen(txt), m_pContentFormat.Get(), rc, m_pTextBrush.Get()); }
+
+            int dayVal = _wtoi(txt);
+            bool isMarked = false;
+            if (m_currentView == CalendarViewMode::Day && dayVal > 0 && month > 0) {
+                long long key = (long long)year * 100 + month;
+                if (m_markedData.count(key) && m_markedData[key].count(dayVal)) isMarked = true;
+            }
+
+            if (sel) {
+                m_pRenderTarget->FillRoundedRectangle(rr, m_pAccentBrush.Get());
+                m_pRenderTarget->DrawText(txt, wcslen(txt), m_pContentFormat.Get(), rc, m_pTextBrush.Get());
+            }
+            else {
+                if (hov) m_pRenderTarget->FillRoundedRectangle(rr, m_pHoverBrush.Get());
+                else if (isMarked) m_pRenderTarget->FillRoundedRectangle(rr, m_pMarkedBrush.Get());
+                m_pRenderTarget->DrawText(txt, wcslen(txt), m_pContentFormat.Get(), rc, m_pTextBrush.Get());
+            }
         }
 
         void StartViewTransition(CalendarViewMode n) {
@@ -209,10 +275,16 @@ namespace UiControls {
             m_prev = { m_currentView, m_currentYear, m_currentMonth }; m_next = { n, m_currentYear, m_currentMonth };
             m_at = (n > m_currentView) ? AT::ZoomOut : AT::ZoomIn; m_currentView = n; StartAnim();
         }
+
         void StartScrollTransition(int d) {
             if (m_isAnimating) return;
             m_prev = { m_currentView, m_currentYear, m_currentMonth };
-            if (m_currentView == CalendarViewMode::Day) AddMonth(d); else if (m_currentView == CalendarViewMode::Month) m_currentYear += d; else m_currentYear += (d * 16);
+            int nextYear = m_currentYear; int nextMonth = m_currentMonth;
+            CalendarViewMode v = m_currentView;
+            if (v == CalendarViewMode::Day) { nextMonth += d; while (nextMonth > 12) { nextMonth -= 12; nextYear++; } while (nextMonth < 1) { nextMonth += 12; nextYear--; } }
+            else if (v == CalendarViewMode::Month) nextYear += d; else nextYear += (d * 16);
+            if (v == CalendarViewMode::Day && m_onViewChangedCallback) m_onViewChangedCallback(nextYear, nextMonth);
+            m_currentYear = nextYear; m_currentMonth = nextMonth;
             m_next = { m_currentView, m_currentYear, m_currentMonth };
             m_at = (d > 0) ? AT::Next : AT::Prev; StartAnim();
         }
@@ -257,7 +329,8 @@ const int ID_COMBO_PARENT = 305;
 const int ID_BTN_ADD_CAT = 306;
 const int ID_BTN_UPDATE_CAT = 307;
 const int ID_BTN_DELETE_CAT = 308;
-const int WM_APP_CAL_CHANGE = WM_APP + 200; // カレンダー変更通知用
+const int WM_APP_CAL_CHANGE = WM_APP + 200;
+const int WM_APP_CAL_VIEW_CHANGE = WM_APP + 201;
 
 // -----------------------------------------------------------------------------
 // ドラッグ＆ドロップ用ヘルパー (変更なし)
@@ -364,10 +437,12 @@ public:
     std::vector<TransactionSummary> GetPieData(const std::wstring& startDate, const std::wstring& endDate, int type, const std::wstring& parentCategoryName) {
         std::vector<TransactionSummary> result; char sDate[32], eDate[32]; WideCharToMultiByte(CP_UTF8, 0, startDate.c_str(), -1, sDate, 32, NULL, NULL); WideCharToMultiByte(CP_UTF8, 0, endDate.c_str(), -1, eDate, 32, NULL, NULL);
         std::map<std::wstring, std::wstring> childToParent; std::map<std::wstring, bool> isParent; auto cats = GetCategories(type); for (const auto& c : cats) { if (c.parentId != 0) { auto it = std::find_if(cats.begin(), cats.end(), [&](const CategoryItem& p) { return p.id == c.parentId; }); if (it != cats.end()) { childToParent[c.name] = it->name; isParent[it->name] = true; } } }
-        std::map<std::wstring, float> sums; sqlite3_stmt* stmt; if (sqlite3_prepare_v2(db, "SELECT category, amount FROM transactions WHERE type=? AND date >= ? AND date <= ?", -1, &stmt, NULL) == SQLITE_OK) { sqlite3_bind_int(stmt, 1, type); 
-        sqlite3_bind_text(stmt, 2, sDate, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 3, eDate, -1, SQLITE_TRANSIENT);
-        while (sqlite3_step(stmt) == SQLITE_ROW) { wchar_t wCat[256]; MultiByteToWideChar(CP_UTF8, 0, (const char*)sqlite3_column_text(stmt, 0), -1, wCat, 256); float amt = (float)sqlite3_column_double(stmt, 1); std::wstring catName = wCat; std::wstring parent = childToParent.count(catName) ? childToParent[catName] : L""; if (parentCategoryName.empty()) { if (!parent.empty()) sums[parent] += amt; else sums[catName] += amt; } else { if (parent == parentCategoryName) sums[catName] += amt; } } } sqlite3_finalize(stmt);
+        std::map<std::wstring, float> sums; sqlite3_stmt* stmt; if (sqlite3_prepare_v2(db, "SELECT category, amount FROM transactions WHERE type=? AND date >= ? AND date <= ?", -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, type);
+            sqlite3_bind_text(stmt, 2, sDate, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, eDate, -1, SQLITE_TRANSIENT);
+            while (sqlite3_step(stmt) == SQLITE_ROW) { wchar_t wCat[256]; MultiByteToWideChar(CP_UTF8, 0, (const char*)sqlite3_column_text(stmt, 0), -1, wCat, 256); float amt = (float)sqlite3_column_double(stmt, 1); std::wstring catName = wCat; std::wstring parent = childToParent.count(catName) ? childToParent[catName] : L""; if (parentCategoryName.empty()) { if (!parent.empty()) sums[parent] += amt; else sums[catName] += amt; } else { if (parent == parentCategoryName) sums[catName] += amt; } }
+        } sqlite3_finalize(stmt);
         int idx = 0; for (auto const& [name, amount] : sums) { bool children = parentCategoryName.empty() && isParent[name]; result.push_back({ name, amount, ColorPalette::Graph[idx % 8], children }); idx++; } std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.amount > b.amount; }); return result;
     }
     std::vector<TimeSeriesData> GetLineData(const std::wstring& startDate, const std::wstring& endDate, ReportMode mode) {
@@ -375,7 +450,26 @@ public:
         sqlite3_stmt* stmt; std::map<int, std::pair<float, float>> aggregation; if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL) == SQLITE_OK) {
             sqlite3_bind_text(stmt, 1, sDate, -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(stmt, 2, eDate, -1, SQLITE_TRANSIENT);
-            while (sqlite3_step(stmt) == SQLITE_ROW) { int timeVal = atoi((const char*)sqlite3_column_text(stmt, 0)); int type = sqlite3_column_int(stmt, 1); float amt = (float)sqlite3_column_double(stmt, 2); if (type == TYPE_INCOME) aggregation[timeVal].first += amt; else aggregation[timeVal].second += amt; } } sqlite3_finalize(stmt); for (auto const& [time, val] : aggregation) result.push_back({ time, val.first, val.second }); return result;
+            while (sqlite3_step(stmt) == SQLITE_ROW) { int timeVal = atoi((const char*)sqlite3_column_text(stmt, 0)); int type = sqlite3_column_int(stmt, 1); float amt = (float)sqlite3_column_double(stmt, 2); if (type == TYPE_INCOME) aggregation[timeVal].first += amt; else aggregation[timeVal].second += amt; }
+        } sqlite3_finalize(stmt); for (auto const& [time, val] : aggregation) result.push_back({ time, val.first, val.second }); return result;
+    }
+
+    std::vector<int> GetRecordedDays(int year, int month) {
+        std::vector<int> days;
+        char datePattern[32];
+        sprintf_s(datePattern, "%04d-%02d-%%", year, month);
+
+        sqlite3_stmt* stmt;
+        const char* sql = "SELECT DISTINCT CAST(strftime('%d', date) AS INTEGER) FROM transactions WHERE date LIKE ?";
+
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, datePattern, -1, SQLITE_STATIC);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                days.push_back(sqlite3_column_int(stmt, 0));
+            }
+        }
+        sqlite3_finalize(stmt);
+        return days;
     }
 };
 
@@ -411,24 +505,49 @@ public:
         D2D1_RECT_F graphRect = D2D1::RectF(graphLeft, graphTop, graphRight, graphBottom); pBrush->SetColor(ColorPalette::Card); pRT->FillRoundedRectangle(D2D1::RoundedRect(graphRect, 10, 10), pBrush); pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.05f)); pRT->DrawRoundedRectangle(D2D1::RoundedRect(graphRect, 10, 10), pBrush, 1.0f);
         float contentPadding = 30.0f; if (!m_currentDrillParent.empty()) { title += L" (" + m_currentDrillParent + L")"; pBrush->SetColor(ColorPalette::TextSecondary); pRT->DrawText(L"← 右クリックで戻る", 10, pTxtSmall, D2D1::RectF(graphLeft + contentPadding, graphTop + 60, graphRight, graphTop + 80), pBrush); }
         pBrush->SetColor(ColorPalette::TextPrimary); pRT->DrawText(title.c_str(), (UINT32)title.length(), pTxtTitle, D2D1::RectF(graphLeft + contentPadding, graphTop + contentPadding, graphRight, graphTop + 80), pBrush);
+
+        m_lastHoveredName = L""; // リセット
+
         D2D1_RECT_F chartArea = D2D1::RectF(graphLeft + contentPadding, graphTop + 80, graphRight - contentPadding, graphBottom - contentPadding);
-        if (gType == GRAPH_PIE) { auto data = db.GetPieData(start, end, currentType, m_currentDrillParent); DrawPieChart(data, chartArea, currentType); }
+        if (gType == GRAPH_PIE) {
+            float width = chartArea.right - chartArea.left;
+            float midX = chartArea.left + width / 2.0f;
+            float gap = 10.0f;
+            D2D1_RECT_F leftArea = D2D1::RectF(chartArea.left, chartArea.top, midX - gap, chartArea.bottom);
+            D2D1_RECT_F rightArea = D2D1::RectF(midX + gap, chartArea.top, chartArea.right, chartArea.bottom);
+
+            // 左：支出
+            auto dataExp = db.GetPieData(start, end, TYPE_EXPENSE, m_currentDrillParent);
+            DrawPieChart(dataExp, leftArea, TYPE_EXPENSE);
+
+            // 右：収入
+            auto dataInc = db.GetPieData(start, end, TYPE_INCOME, m_currentDrillParent);
+            DrawPieChart(dataInc, rightArea, TYPE_INCOME);
+        }
         else { auto data = db.GetLineData(start, end, rMode); DrawLineChart(data, chartArea, rMode); } pRT->EndDraw();
     }
 private:
     void DrawPieChart(const std::vector<TransactionSummary>& data, D2D1_RECT_F area, int type) {
-        float legendWidth = 220.0f; float chartW = (area.right - area.left) - legendWidth; float chartH = area.bottom - area.top; if (chartW < 100) { legendWidth = 0; chartW = area.right - area.left; }
-        //D2D1_POINT_2F center = D2D1::Point2F(area.left + chartW / 2.0f, area.top + chartH / 2.0f);
+        // 【変更】凡例の幅を少し詰めてグラフ領域を確保 (180.0f -> 140.0f)
+        float legendWidth = 140.0f;
+
+        float chartW = (area.right - area.left) - legendWidth;
+        float chartH = area.bottom - area.top;
+        if (chartW < 100) { legendWidth = 0; chartW = area.right - area.left; }
+
         float fullWidth = area.right - area.left;
-        D2D1_POINT_2F center = D2D1::Point2F(area.left + fullWidth / 2.0f, area.top + chartH / 2.0f);
-        float radius = min(chartW, chartH) * 0.4f;
+        D2D1_POINT_2F center = D2D1::Point2F(area.left + (fullWidth - legendWidth) / 2.0f, area.top + chartH / 2.0f);
+
+        // 【変更】半径を拡大 (0.4f -> 0.47f)
+        // ホバー時の拡大(1.05倍)を考慮しても重ならないギリギリのサイズ
+        float radius = min(chartW, chartH) * 0.47f;
+
         float total = 0; for (const auto& d : data) total += d.amount;
-        const TransactionSummary* pHoveredItem = nullptr; float hoveredPercentage = 0.0f; m_lastHoveredName = L"";
+        const TransactionSummary* pHoveredItem = nullptr; float hoveredPercentage = 0.0f;
         if (total > 0) {
             float startAngle = -90.0f; float dx = m_mousePos.x - center.x; float dy = m_mousePos.y - center.y; float dist = sqrt(dx * dx + dy * dy); float mouseAngle = atan2(dy, dx) * 180.0f / PI; if (mouseAngle < -90.0f) mouseAngle += 360.0f;
             for (const auto& d : data) {
                 float sweepAngle = (d.amount / total) * 360.0f;
-                // 誤差対策として360度を超える場合は補正
                 if (sweepAngle > 360.0f) sweepAngle = 360.0f;
                 bool isHovered = false;
                 if (dist <= radius) {
@@ -448,25 +567,18 @@ private:
                 pSink->BeginFigure(center, D2D1_FIGURE_BEGIN_FILLED);
                 float radStart = startAngle * (PI / 180.0f);
                 float radEnd = (startAngle + sweepAngle) * (PI / 180.0f);
-                // 始点の計算
                 D2D1_POINT_2F startPt = D2D1::Point2F(center.x + drawRadius * cos(radStart), center.y + drawRadius * sin(radStart));
                 pSink->AddLine(startPt);
-                // ▼▼▼ 修正ここから ▼▼▼
-                // 360度（1カテゴリのみ）の場合、ArcSegment1回では描画されないため2回に分ける
                 if (sweepAngle >= 359.9f) {
                     float radMid = (startAngle + 180.0f) * (PI / 180.0f);
                     D2D1_POINT_2F midPt = D2D1::Point2F(center.x + drawRadius * cos(radMid), center.y + drawRadius * sin(radMid));
-                    // 前半180度
                     pSink->AddArc(D2D1::ArcSegment(midPt, D2D1::SizeF(drawRadius, drawRadius), 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
-                    // 後半180度（始点に戻る）
                     pSink->AddArc(D2D1::ArcSegment(startPt, D2D1::SizeF(drawRadius, drawRadius), 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
                 }
                 else {
-                    // 通常の描画（終点へ向かう）
                     D2D1_POINT_2F endPt = D2D1::Point2F(center.x + drawRadius * cos(radEnd), center.y + drawRadius * sin(radEnd));
                     pSink->AddArc(D2D1::ArcSegment(endPt, D2D1::SizeF(drawRadius, drawRadius), 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE, sweepAngle > 180.0f ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
                 }
-                // ▲▲▲ 修正ここまで ▲▲▲
                 pSink->EndFigure(D2D1_FIGURE_END_CLOSED);
                 pSink->Close();
                 pBrush->SetColor(d.color);
@@ -481,12 +593,15 @@ private:
             float holeRadius = radius * 0.5f; pBrush->SetColor(ColorPalette::Card); pRT->FillEllipse(D2D1::Ellipse(center, holeRadius, holeRadius), pBrush);
             pTxtTitle->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER); pBrush->SetColor(ColorPalette::TextPrimary); pRT->DrawText(totalStr, (UINT32)wcslen(totalStr), pTxtTitle, D2D1::RectF(center.x - holeRadius, center.y - 30, center.x + holeRadius, center.y + 30), pBrush);
             if (legendWidth > 0) {
-                float legendX = area.left + chartW + 20; float legendY = area.top + 40; pTxtLegend->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING); pBrush->SetColor(ColorPalette::TextSecondary); pRT->DrawText(L"カテゴリ内訳", 6, pTxtLegend, D2D1::RectF(legendX, legendY - 25, area.right, area.bottom), pBrush);
+                float legendX = area.left + chartW + 10; float legendY = area.top + 40; pTxtLegend->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING); pBrush->SetColor(ColorPalette::TextSecondary); pRT->DrawText(L"カテゴリ内訳", 6, pTxtLegend, D2D1::RectF(legendX, legendY - 25, area.right, area.bottom), pBrush);
                 for (const auto& d : data) { pBrush->SetColor(d.color); pRT->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(legendX, legendY + 4, legendX + 12, legendY + 16), 2, 2), pBrush); std::wstring label = d.label; if (d.hasChildren) label += L" (+)"; pBrush->SetColor(ColorPalette::TextPrimary); pRT->DrawText(label.c_str(), (UINT32)label.length(), pTxtNormal, D2D1::RectF(legendX + 20, legendY, area.right, legendY + 20), pBrush); legendY += 28.0f; }
             }
             if (pHoveredItem) { std::wstring tipMoney = FormatMoney(pHoveredItem->amount); wchar_t tipText[128]; std::wstring hint = pHoveredItem->hasChildren ? L"\n(クリックで詳細)" : L""; swprintf_s(tipText, L"%s\n¥%s (%.1f%%)%s", pHoveredItem->label.c_str(), tipMoney.c_str(), hoveredPercentage, hint.c_str()); DrawTooltip(tipText, pRT->GetSize()); }
         }
-        else { pBrush->SetColor(ColorPalette::TextSecondary); pTxtTitle->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER); pRT->DrawText(L"データがありません", 9, pTxtTitle, D2D1::RectF(center.x - 100, center.y, center.x + 100, center.y + 50), pBrush); }
+        else {
+            pBrush->SetColor(ColorPalette::TextSecondary); pTxtTitle->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            pRT->DrawText(L"データがありません", 9, pTxtTitle, D2D1::RectF(center.x - 100, center.y, center.x + 100, center.y + 50), pBrush);
+        }
     }
     void DrawLineChart(const std::vector<TimeSeriesData>& data, D2D1_RECT_F area, ReportMode rMode) {
         float left = area.left + 50; float right = area.right - 20; float top = area.top + 20; float bottom = area.bottom - 40; float width = right - left; float height = bottom - top; if (width <= 0 || height <= 0) return;
@@ -563,6 +678,11 @@ LRESULT CALLBACK EditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 // -----------------------------------------------------------------------------
 UiControls::ModernCalendar* g_pCalInstance = nullptr;
 
+// 【追加】外部からマークを設定するためのヘルパー関数
+void SetCalendarMarks(const std::vector<int>& days) {
+    // 互換性のため残すが、基本は InputPanel で処理する
+}
+
 LRESULT CALLBACK CalendarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_CREATE) {
         g_pCalInstance = new UiControls::ModernCalendar();
@@ -571,6 +691,12 @@ LRESULT CALLBACK CalendarWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_pCalInstance->SetOnDateChanged([hwnd](UiControls::DateInfo d) {
             SendMessage(GetParent(hwnd), WM_APP_CAL_CHANGE, 0, 0);
             });
+
+        // 【追加】表示月変更時に親へ通知
+        g_pCalInstance->SetOnViewChanged([hwnd](int y, int m) {
+            SendMessage(GetParent(hwnd), WM_APP_CAL_VIEW_CHANGE, (WPARAM)y, (LPARAM)m);
+            });
+
         return 0;
     }
     if (msg == WM_DESTROY) { delete g_pCalInstance; g_pCalInstance = nullptr; return 0; }
@@ -597,7 +723,7 @@ void RegisterCalendarClass(HINSTANCE hInst) {
 }
 
 // -----------------------------------------------------------------------------
-// InputPanel (View/Controller) - 変更：ModernCalendarを使用
+// InputPanel (View/Controller)
 // -----------------------------------------------------------------------------
 class InputPanel {
 public:
@@ -664,6 +790,9 @@ public:
         ApplyFont(parent);
         UpdateCategoryList();
         RefreshTransactionList();
+
+        // 【追加】初期化時にマークも更新
+        RefreshCalendarMarks();
     }
     void ApplyFont(HWND parent) {
         HFONT hFont = CreateFont(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, SHIFTJIS_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
@@ -709,6 +838,20 @@ public:
     int GetCurrentType() { return (SendMessage(hRadioInc, BM_GETCHECK, 0, 0) == BST_CHECKED) ? TYPE_INCOME : TYPE_EXPENSE; }
     ReportMode GetReportMode() { return (SendMessage(hRadioYear, BM_GETCHECK, 0, 0) == BST_CHECKED) ? MODE_YEARLY : MODE_MONTHLY; }
     GraphType GetGraphType() { return (SendMessage(hRadioLine, BM_GETCHECK, 0, 0) == BST_CHECKED) ? GRAPH_LINE : GRAPH_PIE; }
+
+    // 【追加】現在表示中の月、または選択日の月のマークを更新
+    void RefreshCalendarMarks() {
+        if (!g_pCalInstance) return;
+        SYSTEMTIME st;
+        GetSelectedDateStruct(&st);
+        UpdateMarksForMonth(st.wYear, st.wMonth);
+    }
+    // 【修正】指定月のマーク更新：年月をカレンダーに伝える
+    void UpdateMarksForMonth(int year, int month) {
+        if (!g_pCalInstance) return;
+        auto days = pDB->GetRecordedDays(year, month);
+        g_pCalInstance->SetMarkedDays(year, month, days);
+    }
 };
 
 // -----------------------------------------------------------------------------
@@ -739,22 +882,65 @@ private:
     LRESULT HandleMessage(UINT msg, WPARAM wp, LPARAM lp) {
         switch (msg) {
         case WM_CREATE: inputPanel.Create(hWnd, &dbManager); return 0;
-            // カレンダー変更通知 (カスタムメッセージ)
+            // カレンダー変更通知
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wp;
+            SetBkMode(hdc, TRANSPARENT); // 文字の背景を透過にする
+            return (LRESULT)GetStockObject(WHITE_BRUSH); // 背景を白で塗りつぶすブラシを返す
+        }
         case WM_APP_CAL_CHANGE:
             inputPanel.RefreshTransactionList();
             InvalidateRect(hWnd, NULL, FALSE);
             return 0;
+            // 【追加】月表示変更通知
+        case WM_APP_CAL_VIEW_CHANGE:
+        {
+            int year = (int)wp;
+            int month = (int)lp;
+
+            // 1. 月ごとのマーク（入力済みバッジ）を更新
+            inputPanel.UpdateMarksForMonth(year, month);
+
+            // 2. 【追加】グラフと連動させるため、選択日付をその月の1日に強制変更
+            if (g_pCalInstance) {
+                g_pCalInstance->SetSelectedDate(year, month, 1);
+            }
+
+            // 3. 【追加】選択日が変更されたので、明細リストも更新
+            inputPanel.RefreshTransactionList();
+
+            // 4. 【追加】グラフ（hWnd全体）を再描画して新しい月を反映
+            InvalidateRect(hWnd, NULL, FALSE);
+        }
+        return 0;
+
         case WM_COMMAND:
             if (LOWORD(wp) == 100) {
                 std::wstring cat; float amt; int type;
                 if (inputPanel.GetInput(cat, amt, type)) {
                     if (inputPanel.m_editingId == -1) dbManager.AddTransaction(inputPanel.GetSelectedDate(), cat, amt, type); else { dbManager.UpdateTransaction(inputPanel.m_editingId, cat, amt, type); inputPanel.CancelEditMode(); }
-                    SetWindowText(inputPanel.hEditAmt, L""); inputPanel.UpdateCategoryList(); inputPanel.RefreshTransactionList(); InvalidateRect(hWnd, NULL, FALSE);
+                    SetWindowText(inputPanel.hEditAmt, L""); inputPanel.UpdateCategoryList(); inputPanel.RefreshTransactionList();
+
+                    // 【追加】データ変更があったのでマーク更新
+                    inputPanel.RefreshCalendarMarks();
+
+                    InvalidateRect(hWnd, NULL, FALSE);
                 }
             }
             if (LOWORD(wp) == ID_BTN_SETTINGS) { SettingsWindow::Show(hWnd, &dbManager); inputPanel.UpdateCategoryList(); InvalidateRect(hWnd, NULL, FALSE); }
             if (LOWORD(wp) == 2001) { int idx = ListView_GetNextItem(inputPanel.hListTrans, -1, LVNI_SELECTED); if (idx != -1) { int id = (int)GetTransactionIdFromList(idx); std::wstring cat = GetTransactionTextFromList(idx, 0); float amt = (float)_wtof(GetTransactionTextFromList(idx, 1).c_str()); std::wstring typeStr = GetTransactionTextFromList(idx, 2); int type = (typeStr == L"収") ? TYPE_INCOME : TYPE_EXPENSE; inputPanel.StartEditMode(id, cat, amt, type); } }
-            if (LOWORD(wp) == 2002) { int idx = ListView_GetNextItem(inputPanel.hListTrans, -1, LVNI_SELECTED); if (idx != -1) { if (MessageBox(hWnd, L"選択した明細を削除しますか？", L"確認", MB_YESNO | MB_ICONWARNING) == IDYES) { int id = (int)GetTransactionIdFromList(idx); dbManager.DeleteTransaction(id); inputPanel.RefreshTransactionList(); InvalidateRect(hWnd, NULL, FALSE); } } }
+            if (LOWORD(wp) == 2002) {
+                int idx = ListView_GetNextItem(inputPanel.hListTrans, -1, LVNI_SELECTED); if (idx != -1) {
+                    if (MessageBox(hWnd, L"選択した明細を削除しますか？", L"確認", MB_YESNO | MB_ICONWARNING) == IDYES) {
+                        int id = (int)GetTransactionIdFromList(idx); dbManager.DeleteTransaction(id); inputPanel.RefreshTransactionList();
+
+                        // 【追加】データ変更があったのでマーク更新
+                        inputPanel.RefreshCalendarMarks();
+
+                        InvalidateRect(hWnd, NULL, FALSE);
+                    }
+                }
+            }
             if (HIWORD(wp) == BN_CLICKED) { if (LOWORD(wp) == 400 || LOWORD(wp) == 401) { inputPanel.UpdateCategoryList(); } canvas.DrillUp(); InvalidateRect(hWnd, NULL, FALSE); }
             return 0;
         case WM_NOTIFY: { LPNMHDR pnm = (LPNMHDR)lp; if (pnm->hwndFrom == inputPanel.hListTrans && pnm->code == NM_RCLICK) { int idx = ListView_GetNextItem(inputPanel.hListTrans, -1, LVNI_SELECTED); if (idx != -1) { POINT pt; GetCursorPos(&pt); HMENU hMenu = CreatePopupMenu(); AppendMenu(hMenu, MF_STRING, 2001, L"修正"); AppendMenu(hMenu, MF_STRING, 2002, L"削除"); TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hWnd, NULL); DestroyMenu(hMenu); } } return 0; }
