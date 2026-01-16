@@ -93,6 +93,9 @@
   <ItemGroup>
     <ResourceCompile Include="Kakeibo.rc" />
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="resource\icon.ico" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

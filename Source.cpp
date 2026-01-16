@@ -12,9 +12,10 @@
 #include <cmath>
 #include <ctime>
 #include <functional>
-#include "sqlite3.h"
-
 #include <uxtheme.h>
+#include "sqlite3.h"
+#include "resource.h"
+
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
@@ -450,8 +451,44 @@ public:
         }
     }
     void InitDefaultCategories() {
-        if (GetCategoryCount(TYPE_EXPENSE) == 0) { int fid = AddCategory(L"食費", TYPE_EXPENSE, 0); AddCategory(L"外食", TYPE_EXPENSE, fid); AddCategory(L"自炊", TYPE_EXPENSE, fid); AddCategory(L"交通費", TYPE_EXPENSE, 0); AddCategory(L"日用品", TYPE_EXPENSE, 0); AddCategory(L"住居費", TYPE_EXPENSE, 0); }
-        if (GetCategoryCount(TYPE_INCOME) == 0) { AddCategory(L"給与", TYPE_INCOME, 0); AddCategory(L"賞与", TYPE_INCOME, 0); }
+        // --- 支出カテゴリの初期化 ---
+        if (GetCategoryCount(TYPE_EXPENSE) == 0) {
+            // 食費
+            int idFood = AddCategory(L"食費", TYPE_EXPENSE, 0);
+            AddCategory(L"自炊", TYPE_EXPENSE, idFood);
+            AddCategory(L"外食", TYPE_EXPENSE, idFood);
+
+            // 住居費
+            int idHouse = AddCategory(L"住居費", TYPE_EXPENSE, 0);
+            AddCategory(L"家賃", TYPE_EXPENSE, idHouse);
+            AddCategory(L"住宅設備", TYPE_EXPENSE, idHouse);
+
+            // 水道光熱費
+            int idUtil = AddCategory(L"水道光熱費", TYPE_EXPENSE, 0);
+            AddCategory(L"電気代", TYPE_EXPENSE, idUtil);
+            AddCategory(L"水道代", TYPE_EXPENSE, idUtil);
+            AddCategory(L"ガス代", TYPE_EXPENSE, idUtil);
+
+            // 通信費
+            int idComm = AddCategory(L"通信費", TYPE_EXPENSE, 0);
+            AddCategory(L"インターネット", TYPE_EXPENSE, idComm);
+            AddCategory(L"スマホ・電話", TYPE_EXPENSE, idComm);
+
+            // 生活・その他
+            AddCategory(L"日用品", TYPE_EXPENSE, 0);
+            AddCategory(L"交通費", TYPE_EXPENSE, 0);
+            AddCategory(L"サブスク", TYPE_EXPENSE, 0);
+            AddCategory(L"医療費", TYPE_EXPENSE, 0);
+            AddCategory(L"娯楽・趣味", TYPE_EXPENSE, 0);
+        }
+
+        // --- 収入カテゴリの初期化 ---
+        if (GetCategoryCount(TYPE_INCOME) == 0) {
+            AddCategory(L"給与", TYPE_INCOME, 0);
+            AddCategory(L"ボーナス", TYPE_INCOME, 0);
+            AddCategory(L"株式配当", TYPE_INCOME, 0);
+            AddCategory(L"臨時収入", TYPE_INCOME, 0);
+        }
     }
     int GetCategoryCount(int type) { sqlite3_stmt* stmt; int count = 0; if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM categories WHERE type=?", -1, &stmt, NULL) == SQLITE_OK) { sqlite3_bind_int(stmt, 1, type); if (sqlite3_step(stmt) == SQLITE_ROW) count = sqlite3_column_int(stmt, 0); } sqlite3_finalize(stmt); return count; }
     int AddCategory(const std::wstring& name, int type, int parentId = 0) {
@@ -1282,7 +1319,7 @@ public:
         InitCommonControls(); RegisterCalendarClass(hInstance);
         dbManager.Initialize(); dbManager.CheckAndApplyFixedCosts();
         canvas.Initialize();
-        WNDCLASS wc = { 0 }; wc.lpfnWndProc = MainApp::WndProc; wc.hInstance = hInstance; wc.hCursor = LoadCursor(NULL, IDC_ARROW); wc.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH); wc.lpszClassName = L"KakeiboAppV4"; RegisterClass(&wc);
+        WNDCLASS wc = { 0 }; wc.lpfnWndProc = MainApp::WndProc; wc.hInstance = hInstance; wc.hCursor = LoadCursor(NULL, IDC_ARROW); wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON1));  wc.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH); wc.lpszClassName = L"KakeiboAppV4"; RegisterClass(&wc);
         hWnd = CreateWindow(L"KakeiboAppV4", L"家計簿アプリ v7.1 (Modern UI)", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1200, 850, NULL, NULL, hInstance, this);
         ShowWindow(hWnd, SW_SHOW);
         MSG msg; while (GetMessage(&msg, NULL, 0, 0)) { if (!IsDialogMessage(hWnd, &msg)) { TranslateMessage(&msg); DispatchMessage(&msg); } }
