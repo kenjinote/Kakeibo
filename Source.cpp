@@ -691,7 +691,7 @@ public:
     }
     bool UpdateAnimation() {
         if (!m_isAnimating) return false; DWORD now = GetTickCount(); float t = (now - m_animStartTime) / 600.0f;
-        if (t >= 1.0f) { t = 1.0f; m_isAnimating = false; } m_animProgress = 1.0f - pow(1.0f - t, 3); return true;
+        if (t >= 1.0f) { t = 1.0f; m_isAnimating = false; } m_animProgress = (float)(1.0 - pow(1.0f - t, 3)); return true;
     }
 
     void Render(HWND hwnd, ExpenseManager& db, const std::wstring& start, const std::wstring& end, std::wstring title, GraphType gType, ReportMode rMode, int currentType) {
@@ -755,7 +755,7 @@ private:
             }
             std::wstring moneyStr = ::FormatMoney(total); wchar_t totalStr[64]; swprintf_s(totalStr, L"%s合計\n¥%s", (type == TYPE_INCOME) ? L"収入" : L"支出", moneyStr.c_str());
             float holeRadius = animRadius * 0.5f; pBrush->SetColor(ColorPalette::Card); pBrush->SetOpacity(1.0f); pRT->FillEllipse(D2D1::Ellipse(center, holeRadius, holeRadius), pBrush);
-            float textStartThreshold = 0.3f; float textAnimT = 0.0f; if (m_animProgress > textStartThreshold) { float rawT = (m_animProgress - textStartThreshold) / (1.0f - textStartThreshold); textAnimT = 1.0f - pow(1.0f - rawT, 3); }
+            float textStartThreshold = 0.3f; float textAnimT = 0.0f; if (m_animProgress > textStartThreshold) { float rawT = (m_animProgress - textStartThreshold) / (1.0f - textStartThreshold); textAnimT = (float)(1.0 - pow(1.0f - rawT, 3)); }
             if (textAnimT > 0.0f) { pBrush->SetColor(ColorPalette::TextPrimary); pBrush->SetOpacity(textAnimT); float scale = 0.7f + 0.3f * textAnimT; D2D1_MATRIX_3X2_F oldTransform; pRT->GetTransform(&oldTransform); pRT->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale, center) * oldTransform); pTxtTitle->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER); pRT->DrawText(totalStr, (UINT32)wcslen(totalStr), pTxtTitle, D2D1::RectF(center.x - holeRadius, center.y - 30, center.x + holeRadius, center.y + 30), pBrush); pRT->SetTransform(oldTransform); pBrush->SetOpacity(1.0f); }
             if (!data.empty()) {
                 float legendY = legendAreaTop; float itemH = 22.0f; size_t maxLen = 0; for (const auto& d : data) { std::wstring label = d.label; if (d.hasChildren) label += L" (+)"; if (label.length() > maxLen) maxLen = label.length(); }
@@ -843,7 +843,7 @@ public:
         int y = rc.top + (rc.bottom - rc.top - h) / 2;
 
         HWND hWnd = CreateWindow(L"SettingsWnd", L"設定", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-            x, y, w, h, hParent, NULL, NULL, wc.hInstance, NULL);
+            x, y, w, h, hParent, NULL, wc.hInstance, NULL);
 
         EnableWindow(hParent, FALSE);
         MSG msg;
@@ -1319,8 +1319,8 @@ public:
         InitCommonControls(); RegisterCalendarClass(hInstance);
         dbManager.Initialize(); dbManager.CheckAndApplyFixedCosts();
         canvas.Initialize();
-        WNDCLASS wc = { 0 }; wc.lpfnWndProc = MainApp::WndProc; wc.hInstance = hInstance; wc.hCursor = LoadCursor(NULL, IDC_ARROW); wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON1));  wc.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH); wc.lpszClassName = L"KakeiboAppV4"; RegisterClass(&wc);
-        hWnd = CreateWindow(L"KakeiboAppV4", L"家計簿アプリ v7.1 (Modern UI)", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1200, 850, NULL, NULL, hInstance, this);
+        WNDCLASS wc = { 0 }; wc.lpfnWndProc = MainApp::WndProc; wc.hInstance = hInstance; wc.hCursor = LoadCursor(NULL, IDC_ARROW); wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON1));  wc.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH); wc.lpszClassName = L"SimpleKakeibo"; RegisterClass(&wc);
+        hWnd = CreateWindow(L"SimpleKakeibo", L"シンプル家計簿 v1.0.0", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1200, 850, NULL, NULL, hInstance, this);
         ShowWindow(hWnd, SW_SHOW);
         MSG msg; while (GetMessage(&msg, NULL, 0, 0)) { if (!IsDialogMessage(hWnd, &msg)) { TranslateMessage(&msg); DispatchMessage(&msg); } }
     }
